@@ -1,0 +1,16 @@
+# Entorno de producción de la API (los valores son de ejemplo; reemplázalos).
+NODE_ENV=production
+PORT=3000
+DATABASE_URL=postgres://auth:CAMBIA_ESTA_CLAVE@db.interno:5432/hypot
+AUTH_PUBLIC_BASE_URL=https://auth.example.com
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=usuario-smtp
+SMTP_PASS=clave-smtp
+MAIL_FROM=no-reply@example.com
+AUTH_SIGNING_KEYS_FILE=/run/secrets/signing-keys.json
+# Un solo balanceador delante de Auth: un salto de confianza.
+TRUST_PROXY=1
+# Igual al número de núcleos del contenedor.
+UV_THREADPOOL_SIZE=4

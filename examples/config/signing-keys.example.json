@@ -1,0 +1,7 @@
+{
+  "active": { "kty": "RSA", "kid": "kid-activa", "n": "...", "e": "AQAB", "d": "...", "p": "...", "q": "...", "dp": "...", "dq": "...", "qi": "..." },
+  "next": { "kty": "RSA", "kid": "kid-siguiente", "n": "...", "e": "AQAB", "d": "...", "p": "...", "q": "...", "dp": "...", "dq": "...", "qi": "..." },
+  "retired": [
+    { "kty": "RSA", "kid": "kid-anterior", "n": "...", "e": "AQAB", "retiredAt": "2026-10-01T12:00:00.000Z" }
+  ]
+}

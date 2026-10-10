@@ -1,0 +1,72 @@
+---
+title: "Validar access tokens con JWKS"
+description: "Cómo verificar offline los access tokens RS256 de hypot Auth con la JWKS: iss, aud, typ, algoritmo, caché y rotación de claves."
+---
+
+import { Aside, Code, TabItem, Tabs } from '@astrojs/starlight/components';
+import verify from '../../../../examples/backend/verify-access-token.js?raw';
+import jwksCurl from '../../../../examples/curl/jwks.sh?raw';
+
+**Los access tokens son JWT firmados con RS256. Valídalos localmente con las claves públicas de Auth (JWKS): no necesitas llamar a Auth en cada petición.** Tu backend solo necesita tres valores de configuración, que el operador te entrega al registrar tu app: la URL de la JWKS, el emisor (`iss`) y tu `client_id`.
+
+## Qué validar
+
+| Regla | Por qué |
+|-------|---------|
+| Descarga la JWKS desde **una URL fija de configuración** (`<emisor>/.well-known/jwks.json`). | Nunca uses `jku`, `x5u` ni `jwk` del encabezado del token: los controla el atacante. |
+| Acepta solo `RS256`. | Bloquea `none` y los ataques de confusión de clave con HS256. |
+| Exige `typ: at+jwt`. | Distingue los access tokens de otros JWT. |
+| Comprueba que `iss` sea igual al emisor configurado. | El emisor es exactamente el `AUTH_PUBLIC_BASE_URL` de Auth, sin barra final. Cópialo del mensaje de alta de tu app. |
+| Comprueba que `aud` sea igual a **tu propio** `client_id`. | Los tokens de otras apps son JWT válidos, pero no son para ti. |
+| Comprueba `exp` (con unos segundos de tolerancia de reloj). | Auth usa 5 segundos. |
+| Elige la clave por `kid`. | Durante una rotación se publican varias claves. |
+| Guarda en caché la JWKS y vuelve a descargarla ante un `kid` desconocido, con un tiempo de espera. | Absorbe la rotación de claves sin saturar a Auth. |
+
+Los tokens llevan `iss`, `aud`, `sub` (el id de la cuenta), `iat`, `exp` y `jti`. **No llevan roles ni permisos**: la autorización es asunto de tu app.
+
+## Implementación con `jose`
+
+<Tabs syncKey="lenguaje">
+  <TabItem label="Node + jose">
+    <Code code={verify} lang="js" title="verify-access-token.js" />
+
+    Usa `createAccessTokenVerifier` una vez al arrancar el servidor y `createAuthenticator` en tu middleware. Cualquier fallo se responde con `401` sin detalle: no reveles por qué falló la verificación.
+  </TabItem>
+  <TabItem label="curl">
+    La JWKS es pública. Esta es la URL que tu backend debe tener fija en su configuración:
+
+    <Code code={jwksCurl} lang="sh" title="jwks.sh" />
+
+    Verás una lista `keys` con claves públicas RSA. Las partes privadas (`d`, `p`, `q`...) nunca se publican.
+  </TabItem>
+</Tabs>
+
+## Caché y rotación de claves
+
+Auth sirve la JWKS con `Cache-Control: public, max-age=300` (5 minutos). Durante una rotación:
+
+1. La clave nueva se publica primero como `next`, **antes** de usarse para firmar.
+2. Después se promueve a `active`, y la anterior queda como `retired` y se sigue publicando hasta que vencen todos sus tokens.
+
+Por eso una caché de hasta 10 minutos es segura. `jose` ignora `Cache-Control` y usa sus propios tiempos: en el ejemplo, `cacheMaxAge` de 10 minutos y `cooldownDuration` de 30 segundos.
+
+<Aside type="note" title="Qué pasa con un kid desconocido">
+Si llega un token firmado con una clave que no está en tu caché, `jose` la vuelve a descargar solo si pasó el tiempo de espera (`cooldownDuration`). Dentro de ese lapso rechaza el token con `ERR_JWKS_NO_MATCHING_KEY`. Es el comportamiento esperado: como el operador publica la clave nueva como `next` y espera como mínimo 15 minutos (recomienda 1 hora) antes de promoverla a `active`, tu caché ya la tiene cuando aparecen los primeros tokens. La prueba de este ejemplo lo reproduce con un servidor JWKS local.
+</Aside>
+
+## Lo que el access token no hace
+
+- **Cerrar sesión o cambiar la contraseña no invalida los access tokens ya emitidos**: siguen valiendo hasta su `exp` (máximo 1 hora). `GET /me` tampoco lo detecta (comprueba la cuenta y la app, no la sesión). Si necesitas un corte inmediato para una acción sensible, mantén tu propio mecanismo, por ejemplo un umbral por cuenta que rechace los tokens con `iat` anterior al último logout o cambio de contraseña que conozca tu backend.
+- No uses el `sub` de un token sin verificar y no pongas un token en la query string de una URL.
+
+## Lista de verificación
+
+- [ ] La URL de la JWKS sale de la configuración, nunca del token.
+- [ ] `algorithms: ['RS256']`, `typ: 'at+jwt'`, `issuer`, `audience` (tu `client_id`) y `exp`.
+- [ ] Cualquier fallo responde `401` sin detalles.
+- [ ] El verificador se crea una vez (conserva la caché) y no por petición.
+- [ ] Tu autorización (roles, permisos) vive en tu app, no en el token.
+
+## Siguiente paso
+
+Continúa con [Leer el usuario](/backend/leer-el-usuario/).

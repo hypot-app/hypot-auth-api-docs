@@ -1,0 +1,58 @@
+---
+title: "Qué es hypot Auth"
+description: "hypot Auth es un servicio de autenticación que solo expone una API JSON. Cada app construye sus pantallas y llama a Auth directamente."
+---
+
+import { Aside, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+**hypot Auth es un servicio de autenticación que solo expone una API JSON.** No sirve páginas, no redirige y no usa cookies. Tu app construye sus propias pantallas (registro, confirmación, login y recuperación de contraseña) y su frontend llama a Auth directamente con el `client_id` de la app. Tu backend únicamente valida los tokens que Auth emite.
+
+## Modelo mental
+
+| Tema | Qué significa para ti |
+|------|-----------------------|
+| Solo API | Auth no sirve pantallas, redirecciones ni cookies. Todas las pantallas son tuyas. |
+| Llamadas directas | Tu frontend llama a Auth con tu `client_id`. Tu backend solo valida tokens. |
+| Contraseñas | Viajan del navegador a Auth. Tu backend nunca las ve. |
+| Cuentas por app | `(app, correo)` es único. El mismo correo en dos apps son dos cuentas independientes, con contraseñas independientes. |
+| Sin SSO | Una sesión en la app A no significa nada para la app B. Un token de A lo rechaza B porque `aud` es distinto. |
+| Tokens | El login devuelve un access token de 1 hora (JWT RS256) y un refresh token opaco. Ambos llegan en el cuerpo JSON. |
+| Sesiones | Un login es una sesión. Los refresh tokens rotan en cada uso. Una sesión dura como máximo 30 días. |
+| Perfiles | Auth guarda solo identidad y credenciales (id, correo, verificación y fecha de creación). Los nombres, avatares y demás datos de perfil son de tu app y se enlazan a la cuenta por `id`, que es el claim `sub`. |
+
+## El flujo en una imagen
+
+![Diagrama de secuencia del inicio de sesión. La persona envía correo y contraseña a tu frontend. El frontend llama a POST /auth/login en hypot Auth y recibe access_token y refresh_token en JSON. Luego llama a tu backend con Authorization Bearer. Tu backend verifica el JWT con la JWKS en caché y responde.](../../assets/diagrams/flujo-general.svg)
+
+En texto: (1) la persona escribe su correo y contraseña en **tu** pantalla; (2) tu frontend llama a `POST /api/v1/auth/login`; (3) Auth responde con los tokens en JSON; (4) tu frontend llama a tu backend con `Authorization: Bearer <access_token>`; (5) tu backend verifica el JWT localmente con las claves públicas de Auth, sin llamarlo en cada petición.
+
+## Qué construyes tú y qué hace Auth
+
+| Tú construyes | Auth se encarga de |
+|---------------|--------------------|
+| Cinco pantallas: registro, confirmación, login, "olvidé mi contraseña" y restablecimiento | Crear cuentas, guardar contraseñas con bcrypt y emitir tokens |
+| El almacenamiento de tokens en el navegador y su renovación | Rotar los refresh tokens y detectar su reutilización |
+| La validación del access token en tu backend | Publicar las claves públicas (JWKS) y rotarlas |
+| Tu tabla de perfiles, enlazada por `sub` | Enviar los correos de confirmación y de restablecimiento, con enlaces a **tus** pantallas |
+| Roles y permisos | Limitar el abuso: límites por IP, bloqueos y respuestas genéricas |
+
+<Aside type="note" title="Lo que Auth no tiene">
+No hay pantallas alojadas, redirecciones, cookies, SSO entre apps, roles, permisos ni datos de perfil. Si alguna de esas piezas te hace falta, es responsabilidad de tu app.
+</Aside>
+
+## Por dónde empezar
+
+<CardGrid>
+  <LinkCard title="Inicio rápido" description="Levanta el stack local, registra una app y recorre registro, confirmación y login con curl." href="/inicio-rapido/" />
+  <LinkCard title="Para frontend" description="Registro, login, refresh, logout, recuperación de contraseña y manejo de errores." href="/frontend/registro-y-confirmacion/" />
+  <LinkCard title="Para backend" description="Valida access tokens con la JWKS y decide cuándo llamar a /me." href="/backend/validar-access-tokens/" />
+  <LinkCard title="Referencia de la API" description="Cada endpoint, generado desde la especificación OpenAPI." href="/referencia/" />
+</CardGrid>
+
+## Lista de verificación para integrar tu app
+
+- [ ] El operador registró tu app y recibiste `client_id`, el emisor (`iss`) y la URL de la JWKS.
+- [ ] Todos los orígenes donde corre tu frontend (incluidos staging y desarrollo local) están registrados.
+- [ ] Construiste las cinco pantallas y las URL de confirmación y restablecimiento coinciden con las registradas.
+- [ ] Tu backend valida `iss`, `aud`, `typ`, `alg` y `exp` de cada access token.
+- [ ] Revisaste la lista de [seguridad](/conceptos/seguridad/).

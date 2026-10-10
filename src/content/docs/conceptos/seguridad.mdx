@@ -1,0 +1,75 @@
+---
+title: "Seguridad"
+description: "Qué datos guarda hypot Auth y cuáles no, cómo protege los tokens y la lista de verificación de seguridad para tu app."
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+**Auth guarda lo mínimo para autenticar: identidad, un hash de la contraseña y hashes de los tokens. No guarda contraseñas ni tokens en claro, ni cookies, ni perfiles.** Esta página resume qué se guarda, qué decisiones protegen cada dato y qué debe cumplir tu app.
+
+## Qué datos se guardan y cuáles no
+
+| Dato | ¿Se guarda? | Cómo |
+|------|-------------|------|
+| Correo de la cuenta | Sí | En minúscula, único por `(app, correo)` |
+| Contraseña | **No en claro** | Hash bcrypt con costo 12. Mínimo 8 caracteres, máximo 72 bytes UTF-8 (bcrypt ignora el resto) y sin NUL |
+| Access token | **No** | Es un JWT firmado, se verifica con la clave pública. No hay lista de emitidos ni de revocados |
+| Refresh token | Solo su SHA-256 | El valor real se muestra una sola vez al cliente |
+| Tokens de confirmación y restablecimiento | Solo su hash | Caducan (24 h y 1 h), se usan una vez y se purgan un día después de vencer |
+| Dirección IP del cliente | **No en claro** | Los contadores de abuso usan un SHA-256 de ámbito, IP y cuenta. En un refresh rotado se guarda un hash de la IP, solo para la ventana de gracia |
+| Cola de correos | Temporalmente | El enlace con el token queda en la cola hasta enviarse; al enviarse o fallar definitivamente se **purga** el contenido. Las filas enviadas o fallidas se borran a los 7 días |
+| Claves de firma | Fuera de la base de datos | Un secreto montado en el servidor, nunca en el repositorio |
+| Nombre, avatar y otros datos de perfil | **No existen** | Son de tu app, enlazados por `sub` |
+| Cookies | **No existen** | Auth nunca envía `Set-Cookie` |
+| Roles y permisos | **No existen** | La autorización es de tu app |
+
+Los datos que no se purgan por tiempo son las cuentas y las apps. Los plazos de retención del resto están en [Operaciones](/operacion/operaciones/).
+
+## Decisiones de diseño que protegen al usuario
+
+| Decisión | Qué evita |
+|----------|-----------|
+| El token de los correos viaja en el fragmento (`#token=`) | Que llegue a servidores, registros o cabeceras `Referer`. Un escáner de correo que abre el enlace no confirma nada, porque confirmar es un `POST` |
+| Confirmar y restablecer son `POST` y `GET /accounts/confirm` responde `404` | Que un prefetch o un escáner consuma un token |
+| Respuestas genéricas en login, signup, resend, forgot, refresh, confirm y reset | Que alguien averigüe qué correos o tokens existen |
+| Rotación de refresh tokens con detección de reutilización | Que un refresh token robado dure: el uso doble revoca la sesión |
+| Restablecer o cambiar la contraseña revoca todas las sesiones | Que una sesión robada sobreviva al cambio de credenciales |
+| La JWKS publica solo claves públicas; el verificador de Auth rechaza `none`, HS256 y `kid` desconocidos | Falsificar tokens |
+| CORS ligado a la app y sin credenciales | Que otro origen registrado use tu `client_id` desde un navegador |
+| Todas las contraseñas pasan por el mismo trabajo de bcrypt | Que el tiempo de respuesta delate qué cuentas existen |
+| Los errores de configuración nombran variables, nunca valores | Que un secreto termine en un registro |
+
+<Aside type="note" title="Lo que sigue siendo tu responsabilidad">
+Un XSS en tu app puede leer la contraseña mientras se escribe y cualquier token que guardes. La mejor defensa es una política CSP estricta en tu frontend, además de las decisiones de almacenamiento de [Login y almacenamiento de tokens](/frontend/login-y-tokens/).
+</Aside>
+
+## Lista de verificación de seguridad para tu app
+
+**General**
+
+- [ ] El tráfico de producción usa solo `https`, tanto para Auth como para tu app. Cualquier origen o URL de correo `http` es solo para desarrollo local.
+- [ ] Registraste todos los orígenes que usas (incluido staging) y los orígenes de tus URL de correo están entre ellos.
+- [ ] Nunca registras tokens, contraseñas ni URL completas con `#token=`. Eso incluye herramientas de seguimiento de errores, analítica y reproducción de sesiones.
+
+**Frontend**
+
+- [ ] Tu app define una política CSP estricta (sin scripts `unsafe-inline` y con una lista de orígenes de script permitidos).
+- [ ] No cargas scripts de terceros en las pantallas de confirmación y restablecimiento antes de haber leído el token y haberlo borrado.
+- [ ] Lees `#token` y enseguida ejecutas `history.replaceState` para quitarlo de la URL.
+- [ ] El access token vive en memoria; elegiste con criterio dónde guardar el refresh token.
+- [ ] Serializas los refresh con una promesa compartida y `navigator.locks`; reintentas como máximo una vez y solo tras una respuesta perdida.
+- [ ] No cierras sesión ante un `429` ni ante `invalid_current_password`.
+- [ ] No usas `credentials: 'include'`: Auth no usa cookies.
+- [ ] Ante `invalid_grant` o tras el logout, borras todos los tokens y cachés de datos del usuario.
+- [ ] Muestras los mismos mensajes neutrales que Auth; no agregas interfaz que revele si un correo existe.
+
+**Backend**
+
+- [ ] La JWKS se obtiene de una URL fija; solo `RS256`; verificas `typ`, `iss`, `aud` (tu `client_id`) y `exp`.
+- [ ] Nunca confías en `jku`, `x5u` ni en un `jwk` incrustado.
+- [ ] No usas el `sub` de un token sin verificar y no pones un token en la query string de una URL.
+- [ ] Tus perfiles se guardan con la clave `sub`; Auth no guarda ninguno.
+
+## Reportar problemas
+
+Si encuentras una diferencia entre esta documentación y el servicio en ejecución, es un error en uno de los dos. Repórtalo en el repositorio de la documentación o de la API.

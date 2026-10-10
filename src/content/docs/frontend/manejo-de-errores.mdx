@@ -1,0 +1,77 @@
+---
+title: "Manejo de errores"
+description: "Tabla de errores de Auth y qué hace tu interfaz con cada uno, incluido 429 con Retry-After y los errores de red."
+---
+
+import { Aside, Code, TabItem, Tabs } from '@astrojs/starlight/components';
+import errorHandling from '../../../../examples/frontend/error-handling.js?raw';
+import rateLimited from '../../../../examples/curl/rate-limited.sh?raw';
+
+**Todos los errores tienen la forma `{ "error": "<código>", "message": "<texto>" }`. Ramifica siempre por `error`, nunca por `message`.** La tabla de decisiones siguiente es código: `actionFor` traduce cada resultado del cliente base en una acción de interfaz.
+
+<Code code={errorHandling} lang="js" title="error-handling.js" />
+
+## Tabla de errores
+
+| Estado | Código | Dónde | Significado y qué hacer |
+|--------|--------|-------|-------------------------|
+| 400 | `invalid_request` | Todo endpoint con cuerpo | Faltan campos o no son texto. Es un error en tu código. |
+| 415 | `unsupported_media_type` | Todo `POST` | El `Content-Type` no es `application/json` (o falta). Un sufijo `; charset=utf-8` es válido. Esta respuesta no lleva cabecera CORS, así que un navegador la muestra como error de red. |
+| 400 | `invalid_email`, `invalid_password` | `invalid_email`: signup, resend, forgot. `invalid_password`: signup, reset, change | Fallo de validación. Es seguro mostrarlo al usuario. |
+| 400 | `invalid_client` | Signup, resend, forgot, refresh | `client_id` desconocido o inactivo, o (salvo en refresh) origen no asociado. Es un error de configuración. En refresh esta respuesta no lleva cabeceras CORS: el navegador la ve como un error de red (`network_error`), no como `invalid_client`. |
+| 400 | `unconfigured_client` | Signup, resend, forgot | La app no tiene las URL de correo. Contacta al operador. |
+| 400 | `invalid_or_expired_link` | Confirm, reset | Token desconocido, usado, vencido o reemplazado, o un origen incorrecto |
+| 400 | `invalid_current_password` | Change | Contraseña actual incorrecta (también durante un bloqueo). No es un problema de sesión. |
+| 401 | `invalid_credentials` | Login | El error genérico de login |
+| 401 | `invalid_grant` | Refresh | La sesión ya no existe o el origen no está asociado. Inicia sesión otra vez. |
+| 401 | `invalid_token` | `/me`, change | Access token ausente, vencido o inválido. Incluye `WWW-Authenticate: Bearer`. |
+| 429 | `rate_limited` | Signup, resend, forgot, reset, confirm, refresh | Límite por IP. Incluye `Retry-After` (segundos enteros). Nunca en login. |
+| 503 | `temporarily_unavailable` | Todo endpoint que consulta el limitador (todos salvo `/me` y logout) | El almacén del limitador no responde. Reintenta más tarde. |
+
+Estos códigos forman parte del contrato: son la tabla de errores de la especificación OpenAPI y una prueba de la API mantiene ambas listas iguales.
+
+## Límite de frecuencia: `429` y `Retry-After`
+
+- **Login nunca devuelve `429`**: un login limitado recibe el `401` genérico.
+- Signup, resend, forgot, reset, confirm y refresh devuelven `429 rate_limited` con `Retry-After` cuando la **IP del cliente** excede su límite. La decisión depende solo de la IP y del endpoint, nunca de la cuenta ni del token.
+- Desactiva el botón de envío hasta que venza `Retry-After` y muestra un mensaje neutral.
+- En refresh, un `429` no es una sesión muerta: conserva los tokens y reintenta el mismo token tras la espera.
+- Las personas detrás de una misma NAT pueden alcanzar los límites juntas.
+- Logout y `/me` no tienen límite por IP. Change tampoco: cuenta las contraseñas incorrectas para el bloqueo.
+- Los valores numéricos son configurables en el servidor. No los escribas en tu código: reacciona a `429` y `Retry-After`.
+
+<Tabs syncKey="lenguaje">
+  <TabItem label="fetch (navegador)">
+    El cliente base expone `retryAfter` (número entero o `null`) y `actionFor` devuelve `{ action: 'wait', seconds }`, con 60 segundos si el servidor no envió la cabecera.
+  </TabItem>
+  <TabItem label="curl">
+    <Code code={rateLimited} lang="sh" title="rate-limited.sh" />
+  </TabItem>
+</Tabs>
+
+## Errores de red
+
+Un `fetch` rechazado significa que no hay respuesta legible: red caída, tiempo agotado o bloqueo de CORS. El cliente base lo convierte en `network_error`. Qué hacer depende de la llamada:
+
+| Llamada | Cómo tratar `network_error` |
+|---------|-----------------------------|
+| Confirm y reset | Igual que `invalid_or_expired_link`: Auth no envía cabecera CORS para un token desconocido o de otra app, y el navegador lo ve como error de red. Muestra "Este enlace no es válido o venció" con el formulario de reenvío. |
+| Refresh | Una respuesta posiblemente perdida: reintenta **una** vez (ver [Refresh](/frontend/refresh/)). Si el reintento también falla, conserva los tokens y reintenta más tarde: no es una sesión muerta. |
+| Login, signup y demás | Muestra "No se pudo conectar. Inténtalo de nuevo" sin culpar a la persona. |
+| Logout | Limpia los tokens locales de todos modos. |
+
+## `503` y reintentos
+
+Si el almacén del limitador no está disponible, los endpoints de credenciales fallan cerrados con `503`. Reintenta con espera creciente y muestra "Inténtalo más tarde". En refresh, un `503` no cierra la sesión: conserva los tokens. No reintentes en un bucle cerrado.
+
+## El silencioso tope de correos por cuenta
+
+Signup, resend y forgot envían como máximo 3 correos por cuenta por hora (valor por defecto), contados en conjunto: un correo de confirmación enviado por usar "olvidé mi contraseña" cuenta igual que los demás. Solo cuenta un correo que realmente se encola. Por encima del tope Auth sigue respondiendo el `202` normal y **no envía nada**: no hay un error que detectar. Tu interfaz debería decir "Si no recibes el correo, revisa tu carpeta de spam e inténtalo de nuevo más tarde".
+
+<Aside type="tip" title="Mensajes neutrales">
+Muestra los mismos mensajes neutrales que Auth. No agregues interfaz que revele si un correo existe o si una cuenta está sin confirmar.
+</Aside>
+
+## Siguiente paso
+
+Si también escribes el backend de tu app, continúa con [Validar access tokens con JWKS](/backend/validar-access-tokens/).

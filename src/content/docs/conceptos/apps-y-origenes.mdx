@@ -1,0 +1,85 @@
+---
+title: "Apps y orígenes"
+description: "Qué es una app en hypot Auth, cómo se registra y cómo CORS queda ligado a la app que identifica cada petición."
+---
+
+import { Aside, Code } from '@astrojs/starlight/components';
+import appCreate from '../../../../examples/cli/app-create.sh?raw';
+import appCreateProduction from '../../../../examples/cli/app-create-production.sh?raw';
+import appUpdate from '../../../../examples/cli/app-update.sh?raw';
+import appDeactivate from '../../../../examples/cli/app-deactivate.sh?raw';
+
+**Una app es la unidad a la que pertenece todo en Auth: cuentas, sesiones, tokens y correos. Cada petición del navegador se acepta solo si su `Origin` está entre los orígenes permitidos de la app que la propia petición identifica.** Las apps las registra un operador con la CLI; no existe un endpoint HTTP para crearlas, cambiarlas ni borrarlas.
+
+## Qué guarda el registro de una app
+
+| Dato | Regla |
+|------|-------|
+| `client_id` | Público, con el formato `app_` más 32 caracteres hexadecimales en minúscula. No es un secreto. |
+| Nombre | Nombre visible; también se usa en los correos. |
+| Orígenes permitidos | Solo origen: `https://app.example` o `https://app.example:8443`. Sin ruta, sin barra final, sin comodines y sin `null`. `http` solo para `localhost` y `127.0.0.1` fuera de producción. El esquema y el host se guardan en minúscula. |
+| `email_confirmation_url` | **Obligatoria.** Tu pantalla de confirmación, por ejemplo `https://app.example/confirm`. |
+| `password_reset_url` | **Obligatoria.** Tu pantalla de restablecimiento, por ejemplo `https://app.example/reset`. |
+| Opcional | Contenido de las plantillas de correo y una dirección de remitente propia (`--email-from`). |
+
+Reglas de las dos URL: absolutas, `https` (o `http` para localhost fuera de producción), sin credenciales y **sin fragmento** (Auth agrega `#token=...`). **El origen de cada URL debe estar entre los orígenes permitidos**: el registro y las actualizaciones se rechazan si no, porque tus pantallas de confirmación y restablecimiento deben poder llamar a Auth. Auth toma las URL solo del registro de la app, nunca de una petición. Sin ambas URL, tu app no puede usar signup, resend ni el restablecimiento de contraseña (`unconfigured_client`).
+
+## Registrar y mantener una app
+
+<Code code={appCreate} lang="sh" title="app-create.sh" />
+
+En un despliegue real, usa URL `https` y todos los orígenes que utilices, incluido staging:
+
+<Code code={appCreateProduction} lang="sh" title="app-create-production.sh" />
+
+La CLI imprime `client_id: app_...`. La validación rechaza la entrada incorrecta con un código de salida distinto de cero y sin guardar nada. Para cambiar la lista de orígenes, `update` **reemplaza** la lista guardada con las opciones `--origin` repetidas, así que incluye también los orígenes que ya tenía:
+
+<Code code={appUpdate} lang="sh" title="app-update.sh" />
+
+`update` puede reemplazar las dos URL pero nunca borrarlas, y falla si quita un origen que una URL guardada todavía usa. Para dejar de aceptar una app:
+
+<Code code={appDeactivate} lang="sh" title="app-deactivate.sh" />
+
+<Aside type="note" title="Cambios y caché">
+Auth guarda en caché las búsquedas de orígenes permitidos hasta 30 segundos. Agregar un origen, quitarlo o desactivar una app puede tardar hasta 30 segundos en aplicarse.
+</Aside>
+
+## Origen ligado a la app
+
+Una petición del navegador lleva la cabecera `Origin`. Auth la permite solo cuando ese origen está entre los orígenes permitidos de **la app que nombra el `client_id` de la petición**. Ser un origen registrado de otra app no basta.
+
+| Petición | Qué app se comprueba |
+|----------|----------------------|
+| Login, refresh, logout, signup, resend, forgot | El `client_id` del cuerpo |
+| Confirm, reset | La app dueña del token del cuerpo |
+| `/me`, cambio de contraseña | El `aud` del access token |
+
+Consecuencias:
+
+- Agrega todos los orígenes que uses, incluidos staging y el desarrollo local.
+- Una discrepancia no devuelve cabeceras CORS y recibe el error genérico del endpoint (`invalid_credentials`, `invalid_grant`, `invalid_or_expired_link`, `invalid_token`, o un `204` sin efecto en logout). Así la respuesta nunca revela si un token o una cuenta son válidos.
+- Si todos tus refresh o logins fallan desde el navegador pero funcionan con curl, revisa primero los orígenes registrados.
+- Las peticiones **sin** `Origin` (apps nativas, servidores) no pasan por la asociación, pero los límites de frecuencia siguen aplicando.
+- Auth nunca envía `Access-Control-Allow-Credentials` ni cookies. No uses `credentials: 'include'`.
+- CORS no es un control de autenticación: solo restringe a los navegadores.
+
+### La petición previa (preflight)
+
+Auth responde `OPTIONS` con `204` cuando el origen pertenece a **cualquier** app activa (la petición previa no tiene cuerpo, así que no puede saber de qué app se trata); la petición real sí se comprueba contra su propio `client_id`. La respuesta lleva exactamente:
+
+| Cabecera | Valor |
+|----------|-------|
+| `Access-Control-Allow-Origin` | El origen de la petición (nunca `*`) |
+| `Access-Control-Allow-Methods` | `GET, POST, OPTIONS` |
+| `Access-Control-Allow-Headers` | `Content-Type, Authorization` (fijas, no se copian de la petición) |
+| `Access-Control-Max-Age` | `600` |
+| `Vary` | `Origin` |
+
+La lista de cabeceras es fija: envía solo `Content-Type` y `Authorization`. Cualquier otra cabecera personalizada hace que el navegador bloquee la llamada.
+
+Un detalle de lectura: además de las respuestas correctas, Auth envía la cabecera CORS en los `400` de validación y en los `429` y `503` del limitador cuando el origen pertenece a una app activa, para que tu cliente pueda leerlos. Un fallo de asociación y un `500` nunca la llevan.
+
+## Qué sigue
+
+- Cómo viven las sesiones: [Sesiones y tokens](/conceptos/sesiones-y-tokens/).
+- Los límites que verán tus usuarios: [Protección contra abuso](/conceptos/proteccion-contra-abuso/).

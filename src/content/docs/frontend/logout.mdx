@@ -1,0 +1,44 @@
+---
+title: "Logout"
+description: "Cómo cerrar sesión: revocar la sesión en Auth y limpiar siempre los tokens locales."
+---
+
+import { Aside, Code, TabItem, Tabs } from '@astrojs/starlight/components';
+import logout from '../../../../examples/frontend/logout.js?raw';
+import logoutCurl from '../../../../examples/curl/logout.sh?raw';
+
+**Cerrar sesión revoca la sesión completa en Auth y siempre debes limpiar tus tokens locales, incluso si la llamada falla.**
+
+<Tabs syncKey="lenguaje">
+  <TabItem label="fetch (navegador)">
+    <Code code={logout} lang="js" title="logout.js" />
+  </TabItem>
+  <TabItem label="curl">
+    <Code code={logoutCurl} lang="sh" title="logout.sh" />
+  </TabItem>
+</Tabs>
+
+## Qué hace Auth
+
+`POST /api/v1/auth/logout` con `client_id` y `refresh_token` responde `204 No Content` para un token activo, usado, vencido, desconocido o de otra app. Es idempotente y no revela si el token era válido.
+
+| Detalle | Comportamiento |
+|---------|----------------|
+| Qué revoca | La sesión completa del token, pero solo si el token pertenece a tu `client_id` y el `Origin` (si lo hay) está asociado a tu app |
+| Desde un origen no permitido | Responde igualmente `204`, sin revocar nada y sin cabecera CORS |
+| Cuerpo mal formado | `400 invalid_request` |
+| Límites | Logout no tiene límite por IP |
+
+<Aside type="caution" title="El access token sigue siendo válido">
+El access token ya emitido sigue valiendo hasta su `exp` (como máximo 1 hora): Auth no mantiene una lista de tokens revocados. `GET /me` no sirve para cortar el acceso: comprueba que la cuenta exista y que la app siga activa, pero no que la sesión siga abierta. Si una acción sensible necesita un corte inmediato, tu backend debe llevar su propio mecanismo (por ejemplo, registrar el momento del logout o del cambio de contraseña y rechazar los tokens con `iat` anterior).
+</Aside>
+
+## Lista de verificación
+
+- [ ] Limpias el access token, el refresh token y las cachés con datos del usuario antes de llamar a Auth.
+- [ ] No bloqueas la interfaz esperando la respuesta de logout.
+- [ ] No cierras sesión por un `429` ni por `invalid_current_password`.
+
+## Siguiente paso
+
+Continúa con [Recuperar y cambiar contraseña](/frontend/recuperar-y-cambiar-contrasena/).

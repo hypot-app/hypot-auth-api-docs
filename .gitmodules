@@ -1,0 +1,4 @@
+[submodule "api"]
+	path = api
+	url = https://github.com/hypot-app/hypot-auth-api.git
+	branch = develop

@@ -1,0 +1,106 @@
+---
+title: "Recuperar y cambiar contraseña"
+description: "Flujo de \"olvidé mi contraseña\" con token en el fragmento, restablecimiento y cambio de contraseña con sesión iniciada."
+---
+
+import { Aside, Code, TabItem, Tabs } from '@astrojs/starlight/components';
+import password from '../../../../examples/frontend/password.js?raw';
+import confirmPage from '../../../../examples/frontend/confirm-page.js?raw';
+import forgotCurl from '../../../../examples/curl/forgot.sh?raw';
+import resetCurl from '../../../../examples/curl/reset.sh?raw';
+import changeCurl from '../../../../examples/curl/change.sh?raw';
+
+**Recuperar la contraseña tiene dos pasos: pedir el correo (`forgot`) y restablecer con el token del enlace (`reset`). Cambiarla con sesión iniciada es una llamada aparte (`change`). En ambos casos Auth revoca todas las sesiones de la cuenta.**
+
+![Diagrama de secuencia de la recuperación de contraseña. El frontend llama a POST /password/forgot y Auth responde 202 genérico. Auth envía el enlace a la URL de restablecimiento de la app con el token en el fragmento. El frontend lee el token, limpia la URL y llama a POST /password/reset con el token y la nueva contraseña. Auth responde 204 y revoca todas las sesiones.](../../../assets/diagrams/flujo-recuperacion.svg)
+
+El código de esta página está en un solo archivo, `password.js`, que usa el [cliente base](/frontend/registro-y-confirmacion/#cliente-base) y la función `takeTokenFromUrl` de la pantalla de confirmación.
+
+<Code code={password} lang="js" title="password.js" />
+
+## Paso 1: pedir el correo
+
+<Tabs syncKey="lenguaje">
+  <TabItem label="fetch (navegador)">
+    Usa `requestPasswordReset(client, email)` de `password.js`.
+  </TabItem>
+  <TabItem label="curl">
+    <Code code={forgotCurl} lang="sh" title="forgot.sh" />
+  </TabItem>
+</Tabs>
+
+La respuesta es siempre `202` con el mismo texto fijo, sin importar si la cuenta existe, no está confirmada o pertenece a otra app:
+
+```json
+{ "message": "If an account exists for this address, an email is on its way." }
+```
+
+Lo que se envía depende de la cuenta, y no puedes saberlo por la respuesta:
+
+| Cuenta en tu app | Correo |
+|------------------|--------|
+| Confirmada | Un correo de restablecimiento (enlace a tu `password_reset_url`) |
+| Sin confirmar | Un correo de **confirmación** (enlace a tu `email_confirmation_url`), porque un restablecimiento no podría iniciar sesión. Tu pantalla de confirmación lo atiende como siempre. |
+| Desconocida, o solo existente en otra app | Nada |
+
+Cada correo enviado cuenta para el tope por cuenta (3 por hora por defecto, compartido con signup y resend). Dile a la persona "Si la dirección está registrada, recibirás un correo".
+
+## Paso 2: restablecer
+
+El enlace es `<password_reset_url>#token=<token>`, vale **1 hora** y se usa una sola vez. Una solicitud `forgot` más reciente invalida los enlaces anteriores.
+
+Lee y borra el token **exactamente igual que en la pantalla de confirmación**: con `takeTokenFromUrl`, al cargar la página, y conserva el valor en una variable hasta que la persona envíe la nueva contraseña.
+
+<Code code={confirmPage} lang="js" title="confirm-page.js" />
+
+<Tabs syncKey="lenguaje">
+  <TabItem label="fetch (navegador)">
+    Usa `resetPassword(client, { token, newPassword })` de `password.js`.
+  </TabItem>
+  <TabItem label="curl">
+    <Code code={resetCurl} lang="sh" title="reset.sh" />
+  </TabItem>
+</Tabs>
+
+La respuesta correcta es `204 No Content`. La contraseña se reemplaza y **se revocan todas las sesiones de la cuenta**. No hay redirección ni inicio de sesión automático: envía a la persona a tu pantalla de login.
+
+| Caso | Respuesta |
+|------|-----------|
+| Token inválido, usado, vencido o reemplazado por uno más nuevo | `400 invalid_or_expired_link` |
+| Contraseña débil o inválida | `400 invalid_password`. El token sigue siendo utilizable: deja que la persona reintente. |
+| Límite por IP | `429` con `Retry-After` |
+
+## Cambiar la contraseña con la sesión iniciada
+
+<Tabs syncKey="lenguaje">
+  <TabItem label="fetch (navegador)">
+    Usa `changePassword({ client, store, refresher }, { currentPassword, newPassword })` de `password.js`.
+  </TabItem>
+  <TabItem label="curl">
+    <Code code={changeCurl} lang="sh" title="change.sh" />
+  </TabItem>
+</Tabs>
+
+Responde `204 No Content`. **Se revocan todas las sesiones, incluida la de quien llama**, y se envía un aviso de cambio de contraseña por correo. Borra tus tokens y envía a la persona al login con la contraseña nueva. El access token actual sigue válido hasta su `exp`.
+
+| Caso | Respuesta | Qué mostrar |
+|------|-----------|-------------|
+| Access token ausente, vencido o inválido | `401 invalid_token` | Renueva una vez y, si sigue fallando, pide iniciar sesión |
+| Contraseña actual incorrecta | `400 { "error": "invalid_current_password" }` | "La contraseña actual es incorrecta" en ese campo |
+| Contraseña nueva débil | `400 invalid_password` | Error en el campo |
+
+<Aside type="caution" title="Una contraseña actual incorrecta es un 400, no un 401">
+Es deliberado: un `401` parecería un token vencido y llevaría a un cliente que renueva ante cada `401` a un bucle. No renueves ni cierres sesión ante `invalid_current_password`. Además cuenta como intento fallido para el bloqueo: tras varios fallos, incluso la contraseña actual correcta recibe el mismo `400` durante un tiempo. Consulta [Protección contra abuso](/conceptos/proteccion-contra-abuso/).
+</Aside>
+
+## Lista de verificación
+
+- [ ] El mensaje tras `forgot` es neutral y no revela si el correo existe.
+- [ ] La pantalla de restablecimiento lee y limpia `#token` al cargar, antes de cualquier script de terceros.
+- [ ] Tras `reset` o `change`, vas al login: no hay sesión automática.
+- [ ] Ante `invalid_current_password` no renuevas ni cierras sesión.
+- [ ] Tu pantalla de confirmación funciona también para quien llega desde "olvidé mi contraseña".
+
+## Siguiente paso
+
+Continúa con [Manejo de errores](/frontend/manejo-de-errores/).
