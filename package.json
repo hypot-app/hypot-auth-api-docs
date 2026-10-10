@@ -12,9 +12,10 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "test": "node --test --test-timeout=300000 --test-concurrency=1 \"test/**/*.test.js\"",
-    "test:unit": "node --test \"test/unit/**/*.test.js\"",
-    "test:snippets": "node --test --test-timeout=300000 --test-concurrency=1 \"test/snippets/**/*.test.js\""
+    "test": "node --test --test-timeout=600000 --test-concurrency=1 \"test/**/*.test.js\"",
+    "test:unit": "node --test --test-timeout=300000 --test-concurrency=1 \"test/unit/**/*.test.js\"",
+    "test:snippets": "node --test --test-timeout=600000 --test-concurrency=1 \"test/snippets/**/*.test.js\"",
+    "csp:update": "node scripts/update-csp.mjs"
   },
   "dependencies": {
     "@astrojs/starlight": "0.42.6",

@@ -1,0 +1,12 @@
+# Used instead of .dockerignore when building ./Dockerfile (BuildKit). Only what the build needs reaches the context.
+*
+!package.json
+!package-lock.json
+!astro.config.mjs
+!tsconfig.json
+!config
+!src
+!public
+!examples
+!docker
+!api/openapi.json
