@@ -1,0 +1,75 @@
+---
+title: "Protección contra abuso"
+description: "Límites por IP, bloqueo de login por cuenta, tope silencioso de correos y respuestas genéricas que evitan revelar qué cuentas existen."
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+**Auth limita el abuso con contadores en Postgres, bloqueos de login por cuenta y respuestas que nunca revelan si un correo o un token existen.** Los números siguientes son valores por defecto que el operador puede cambiar: tu app no debe escribirlos en su código; debe reaccionar a `429` y a `Retry-After`.
+
+## Resumen de los límites
+
+| Ámbito | Se aplica a | Al superarlo | Por defecto |
+|--------|-------------|--------------|-------------|
+| Login por IP (`LOGIN_IP`) | login | `401` genérico de login, nunca `429` | 100 por 15 min |
+| Par cuenta + IP (`LOGIN_ACCOUNT_IP`) | login, cambio de contraseña (contraseña actual incorrecta) | `401` genérico para esa IP (en cambio de contraseña, `400 invalid_current_password`) | 5 intentos por 15 min; bloqueo de 15 min |
+| Cuenta global (`LOGIN_ACCOUNT`) | login, cambio de contraseña | `401` genérico desde cualquier IP (en cambio, el mismo `400`) | 50 intentos por ventana de 1 h; al alcanzarlo, la cuenta se bloquea 15 min |
+| Correo por IP (`EMAIL_IP`) | signup, resend, forgot | `429` con `Retry-After` | 20 por 1 h |
+| Restablecimiento por IP (`RESET_IP`) | reset | `429` con `Retry-After` | 20 por 1 h |
+| Confirmación por IP (`CONFIRM_IP`) | confirm | `429` con `Retry-After` | 20 por 1 h |
+| Refresh por (app, IP) (`REFRESH_IP`) | refresh | `429` con `Retry-After` | 60 por 15 min |
+| Correo por cuenta (`EMAIL_ACCOUNT`) | signup, resend, forgot | `202` normal, sin enviar el correo | 3 por 1 h |
+| Almacén no disponible | endpoints de credenciales | `503 temporarily_unavailable` | No aplica |
+
+`/me` y logout no tienen limitador. La decisión de un `429` depende solo de la IP y del endpoint, nunca del estado de la cuenta ni del token.
+
+## El bloqueo de login
+
+Login y cambio de contraseña comparten dos contadores:
+
+1. **Par (cuenta, IP)**: 5 intentos en 15 minutos desde una IP para una cuenta bloquean a *esa IP* para *esa cuenta* durante 15 minutos. Al terminar el bloqueo, la cuenta de intentos vuelve a empezar. Una IP obtiene como máximo unos 20 intentos por hora.
+2. **Cuenta global**: 50 intentos en una ventana de 1 hora, desde cualquier IP, bloquean la cuenta 15 minutos. Todas las IPs juntas obtienen como máximo unos 200 intentos por hora, y un atacante distribuido necesita al menos 10 IP distintas para lograrlo.
+
+Ambos contadores cuentan **intentos**, no solo fallos. Un éxito reembolsa únicamente el contador del par. Mientras una cuenta está bloqueada, incluso la contraseña correcta recibe el mismo `401` genérico, por lo que una persona puede ver "contraseña incorrecta" con la contraseña correcta. Sugiere "Olvidé mi contraseña" tras unos pocos fallos.
+
+<Aside type="caution" title="No inicies sesión una y otra vez con una cuenta de servicio">
+Una cuenta de servicio o automatización que inicia sesión más de 50 veces por hora bloquea su propia cuenta durante 15 minutos, y con ella a todas las personas que la usan. Inicia sesión una vez, conserva el refresh token, renueva el access token con él y vuelve a iniciar sesión solo cuando te rechace el refresh token.
+</Aside>
+
+## Respuestas genéricas
+
+Para no revelar qué correos tienen cuenta, Auth responde igual en estos casos:
+
+| Endpoint | Respuesta única | Casos que no se distinguen |
+|----------|-----------------|----------------------------|
+| Login | `401 invalid_credentials` (mismo estado, cuerpo y cabeceras) | Correo desconocido, contraseña incorrecta, cuenta sin confirmar, cuenta bloqueada, par bloqueado, IP sobre su límite, `client_id` desconocido o origen no asociado |
+| Signup | `202` con texto fijo | Dirección nueva o ya registrada |
+| Resend | `202` con texto fijo | Cuenta inexistente, sin confirmar o ya confirmada |
+| Forgot | `202` con texto fijo | Cuenta inexistente, sin confirmar, o existente solo en otra app |
+| Refresh, confirm, reset | Un único error por endpoint (`invalid_grant`, `invalid_or_expired_link`) | Token desconocido, usado, vencido, de otra app u origen no asociado |
+| Logout | `204` | Token activo, usado, vencido, desconocido o de otra app |
+
+Además, el tiempo de respuesta no filtra información: cada intento procesado cuesta el mismo trabajo de bcrypt (un login con correo desconocido calcula un hash ficticio), y las peticiones que un límite o un bloqueo rechaza se contestan antes del hash. Quedan diferencias residuales de milisegundos en `resend` y `signup`, aceptadas y acotadas por los límites por IP y por cuenta.
+
+Para tu interfaz, eso significa mostrar mensajes neutrales y **no** agregar pantallas que revelen si un correo existe.
+
+## Tope silencioso de correos por cuenta
+
+Signup, resend y forgot envían como máximo 3 correos por cuenta por hora, contados en conjunto. Solo cuenta un correo que realmente se encola: un resend de una cuenta confirmada o desconocida, o un forgot de una dirección desconocida, no consume cupo. Por encima del tope, Auth responde igualmente el `202` y **no envía nada**. Un signup de una dirección nueva sigue creando la cuenta, pero sin correo. No hay error que detectar: tu interfaz debe sugerir revisar el spam y reintentar más tarde.
+
+## De dónde sale la IP del cliente
+
+Por defecto, la IP es la del par TCP. Detrás de un balanceador o proxy, el operador debe configurar `TRUST_PROXY` con el número de saltos o la lista de proxies de confianza; si no, todos los usuarios comparten la dirección del proxy y uno solo puede agotar el límite de todos. Configurado de más, un `X-Forwarded-For` enviado por el cliente prevalece. Las IPv6 se agrupan por su prefijo /64. Detalles en [Despliegue](/operacion/despliegue/).
+
+Los usuarios detrás de una misma NAT comparten límites.
+
+## Dónde viven los contadores
+
+Los contadores están en la tabla `abuse_counters` de Postgres, sin Redis. La clave de cada fila es un SHA-256 (no se guarda la IP ni el correo en claro). La tabla es `UNLOGGED`: es rápida pero no sobrevive a un fallo del servidor ni se replica. Tras un fallo o un cambio de servidor, empieza vacía y cada ventana y bloqueo se reinician, lo que solo perdona y nunca bloquea. Un barredor elimina las filas vencidas cada 5 minutos.
+
+Si el almacén de contadores falla, los endpoints de credenciales **fallan cerrados** con `503 temporarily_unavailable`.
+
+## Qué sigue
+
+- Cómo reaccionar a cada respuesta: [Manejo de errores](/frontend/manejo-de-errores/).
+- Cómo configurar los límites: [Configuración](/operacion/configuracion/).

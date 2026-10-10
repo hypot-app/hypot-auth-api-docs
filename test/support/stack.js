@@ -1,16 +1,17 @@
 // Real stack for the snippet tests: Postgres 17 + the API image built from the `api` submodule + Mailpit.
 // Everything runs in Testcontainers on a private network. Nothing is shared between test files.
 import { createHash, generateKeyPairSync, randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GenericContainer, Network, Wait } from 'testcontainers';
 import { PostgreSqlContainer } from '@testcontainers/postgresql';
 
 export const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const API_IMAGE = 'hypot-auth-api-docs-test:local';
+export const API_IMAGE = 'hypot-auth-api-docs-test:local';
 const MAILPIT_IMAGE = 'axllent/mailpit:v1.31.3';
 const POSTGRES_IMAGE = 'postgres:17-alpine';
-const NODE = '/nodejs/bin/node'; // the runtime image is distroless: no shell, only node
+export const NODE = '/nodejs/bin/node'; // the runtime image is distroless: no shell, only node
 
 /** The browser origin that the registered test app allows. Node has no real browser origin, so tests send it. */
 export const APP_ORIGIN = 'http://localhost:5173';
@@ -18,7 +19,7 @@ export const APP_ORIGIN = 'http://localhost:5173';
 export const ISSUER = 'http://localhost:3000';
 
 /** Builds the API image from the submodule. Docker caches the layers, so only the first run is slow. */
-async function buildApiImage() {
+export async function buildApiImage() {
   await GenericContainer.fromDockerfile(join(ROOT, 'api')).build(API_IMAGE, { deleteOnExit: false });
 }
 
@@ -55,6 +56,18 @@ function apiEnv(extra = {}) {
   };
 }
 
+/**
+ * The command of examples/cli/migrate.sh (or migrate-revert.sh) as the arguments of the image's node binary.
+ * The docs show `node <args>`; the distroless image has node at an absolute path, so the test runs the same arguments.
+ */
+export function nodeArgsFromSnippet(name) {
+  const line = readFileSync(join(ROOT, 'examples', 'cli', name), 'utf8')
+    .split(/\r?\n/)
+    .find((candidate) => candidate.trim() !== '' && !candidate.startsWith('#'));
+  if (!line?.startsWith('node ')) throw new Error(`${name} must be a "node ..." command`);
+  return line.slice('node '.length).trim().split(/\s+/);
+}
+
 /** Splits `docker compose run --rm api dist/cli.js <args>` into the args that follow `dist/cli.js`. */
 export function cliArgsFromSnippet(snippet, env = {}) {
   const prefix = 'docker compose run --rm api dist/cli.js ';
@@ -77,10 +90,11 @@ export function cliArgsFromSnippet(snippet, env = {}) {
 
 /**
  * Starts the stack. Options:
+ * - `signingKeys`: the JSON of the key set to use instead of a generated one.
  * - `strict`: also starts a second API instance (own app) whose refresh limit is 2 per window, to see a real 429.
  * Returns URLs, the registered test app and `stop()`.
  */
-export async function startStack({ strict = false } = {}) {
+export async function startStack({ strict = false, signingKeys: signingKeysOverride = null } = {}) {
   await buildApiImage();
   const network = await new Network().start();
   const started = [];
@@ -110,12 +124,12 @@ export async function startStack({ strict = false } = {}) {
       await new GenericContainer(API_IMAGE)
         .withNetwork(network)
         .withEnvironment({ DATABASE_URL: apiEnv().DATABASE_URL })
-        .withCommand(['node_modules/typeorm/cli.js', 'migration:run', '-d', 'dist/platform/persistence/data-source.js'])
+        .withCommand(nodeArgsFromSnippet('migrate.sh'))
         .withWaitStrategy(Wait.forOneShotStartup())
         .start(),
     );
 
-    const signingKeys = JSON.stringify(generateSigningKeys());
+    const signingKeys = signingKeysOverride ?? JSON.stringify(generateSigningKeys());
     const startApi = async (extraEnv, alias) =>
       track(
         await new GenericContainer(API_IMAGE)
@@ -167,6 +181,15 @@ export async function startStack({ strict = false } = {}) {
       network,
       api,
       runCli: (args) => runCli(api, args),
+      /** Another API instance on the same database and network (for example with different keys or environment). */
+      startApi: async (extraEnv, alias) => {
+        const container = await startApi(extraEnv, alias);
+        return {
+          container,
+          url: `http://${container.getHost()}:${container.getMappedPort(3000)}`,
+          runCli: (args) => runCli(container, args),
+        };
+      },
       registerApp: (name) => registerApp(api, name),
       stop: async () => {
         for (const container of started.reverse()) await container.stop({ remove: true, removeVolumes: true });
@@ -246,5 +269,9 @@ export async function confirmedAccountRaw(stack, mail, clientId = stack.clientId
   const token = tokenFromEmail(await mail.waitForMessage(email));
   const confirm = await post('/accounts/confirm', { token });
   if (confirm.status !== 200) throw new Error(`confirm failed: ${confirm.status}`);
+  confirmedAccountRaw.usedTokens.set(email, token);
   return email;
 }
+
+/** email -> the confirmation token that confirmedAccountRaw already used. */
+confirmedAccountRaw.usedTokens = new Map();

@@ -14,6 +14,7 @@ import {
   ROOT,
   cliArgsFromSnippet,
   mailbox,
+  nodeArgsFromSnippet,
   startStack,
   uniqueEmail,
 } from '../support/stack.js';
@@ -183,16 +184,23 @@ describe('operator CLI snippets', () => {
     await run('app-deactivate.sh', { CLIENT_ID: clientId });
   });
 
-  it('the migrate snippet matches the migrate service of the API compose file, and a second run finds nothing pending', async () => {
-    assert.equal(snippet('cli', 'migrate.sh').trim(), 'docker compose run --rm migrate');
+  it('the migrate snippet is the command of the migrate service in the API compose file, and a second run finds nothing pending', async () => {
     const compose = readFileSync(join(ROOT, 'api', 'compose.yaml'), 'utf8');
-    assert.match(
-      compose,
-      /command: \["node_modules\/typeorm\/cli\.js", "migration:run", "-d", "dist\/platform\/persistence\/data-source\.js"\]/,
-    );
-    const again = await stack.api.exec(['/nodejs/bin/node', 'node_modules/typeorm/cli.js', 'migration:run', '-d', 'dist/platform/persistence/data-source.js']);
+    const args = nodeArgsFromSnippet('migrate.sh');
+    assert.ok(compose.includes(`command: [${args.map((arg) => `"${arg}"`).join(', ')}]`), 'api/compose.yaml migrate command differs');
+    const again = await stack.api.exec(['/nodejs/bin/node', ...args]);
     assert.equal(again.exitCode, 0, again.output);
     assert.match(again.output, /No migrations are pending/);
+  });
+
+  it('migrate-revert.sh undoes one migration and migrate.sh applies it again', async () => {
+    const node = '/nodejs/bin/node';
+    const revert = await stack.api.exec([node, ...nodeArgsFromSnippet('migrate-revert.sh')]);
+    assert.equal(revert.exitCode, 0, revert.output);
+    assert.match(revert.output, /has been .*reverted successfully/i);
+    const apply = await stack.api.exec([node, ...nodeArgsFromSnippet('migrate.sh')]);
+    assert.equal(apply.exitCode, 0, apply.output);
+    assert.match(apply.output, /executed successfully/i);
   });
 
   it('ops:revoke-all ends every open session (run last: it affects the whole instance)', async () => {

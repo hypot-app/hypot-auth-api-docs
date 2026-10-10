@@ -1,0 +1,81 @@
+---
+title: "Sesiones y tokens"
+description: "Qué tokens existe, cuánto duran, cómo rota el refresh token, cuándo se detecta su reutilización y qué eventos terminan una sesión."
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+**Un login abre una sesión. Dentro de ella circulan un access token de corta vida y una cadena de refresh tokens que rotan en cada uso. Si alguien presenta un refresh token ya usado, Auth asume robo y revoca la sesión entera.**
+
+## Los tres tipos de token
+
+| Token | Formato | Duración | Se guarda en Auth como | Para qué sirve |
+|-------|---------|----------|------------------------|----------------|
+| Access token | JWT firmado con RS256 | 1 hora | No se guarda | Autenticar llamadas a tu backend y a `/me` y `change` |
+| Refresh token | Opaco, 256 bits de un generador criptográfico | 7 días sin uso y 30 días como máximo desde el login | Solo su SHA-256 | Obtener un par nuevo de tokens |
+| Token de un solo uso (confirmación o restablecimiento) | Opaco, en el fragmento del enlace del correo | 24 horas la confirmación, 1 hora el restablecimiento | Solo su hash | Confirmar el correo o restablecer la contraseña |
+
+El refresh token se muestra una sola vez, en la respuesta, y Auth no puede volver a mostrártelo.
+
+## El access token
+
+Es un JWT con estos elementos:
+
+| Parte | Valor |
+|-------|-------|
+| Encabezado | `alg: RS256`, `typ: at+jwt`, `kid` (presente en la JWKS) |
+| Claims | `iss` (el emisor), `aud` (el `client_id` de la app), `sub` (id de la cuenta), `iat`, `exp` (`iat` más 3600) y `jti` |
+| No incluye | Roles, permisos, nombre ni perfil |
+
+El emisor es exactamente el `AUTH_PUBLIC_BASE_URL` que configura el operador, sin barra final, y la URL de la JWKS es `<emisor>/.well-known/jwks.json`. Cómo verificarlo: [Validar access tokens con JWKS](/backend/validar-access-tokens/).
+
+## Duraciones de la sesión
+
+| Concepto | Valor por defecto | Variable |
+|----------|-------------------|----------|
+| Duración absoluta de la sesión, desde el login. La rotación **no** la extiende. | 30 días | `REFRESH_ABSOLUTE_TTL_SECONDS` |
+| Vida de un refresh token sin usarse, limitada al final de la sesión | 7 días | `REFRESH_IDLE_TTL_SECONDS` |
+| Ventana de gracia para reutilizar un token rotado | 10 segundos (`0` la desactiva) | `REFRESH_REUSE_GRACE_SECONDS` |
+
+Son ajustes del operador: no los escribas en tu código. Lee `expires_in` y trata cualquier `invalid_grant` como "inicia sesión otra vez".
+
+## Rotación y detección de reutilización
+
+Cada `POST /api/v1/auth/refresh` marca el token presentado como usado y emite uno nuevo dentro de la misma sesión, que nunca sobrevive a su fin absoluto.
+
+Si se presenta un token usado o revocado, Auth responde `401 invalid_grant` y **revoca toda la sesión** (razón interna `reuse_detected`): un ladrón y el cliente real no pueden usar la misma cadena a la vez.
+
+### La excepción: la ventana de gracia
+
+Existe para una respuesta perdida en una red inestable. Un token rotado que se presenta de nuevo recibe un par nuevo, y la sesión sigue activa, solo si se cumplen **todas** estas condiciones:
+
+| Condición | Detalle |
+|-----------|---------|
+| Tiempo | Dentro de `REFRESH_REUSE_GRACE_SECONDS` (10 s) desde la rotación |
+| Origen | Desde la misma IP del cliente (en IPv6, el mismo /64) |
+| Primera vez | Es el primer reintento de ese token |
+| Sucesor sin usar | El token que lo sustituyó todavía no se usó |
+
+En ese caso el sucesor se revoca y el reintento recibe un par nuevo. Cualquier otro caso (más tarde, otra IP, segundo reintento, sucesor ya usado) es `invalid_grant` y la sesión se revoca. La ventana **no** sirve para pestañas que compiten: la ganadora de la carrera tiene un token que un uso posterior por gracia revoca. Por eso el cliente debe [serializar los refresh](/frontend/refresh/).
+
+<Aside type="caution" title="La gracia depende de TRUST_PROXY">
+La comparación de IP supone que `TRUST_PROXY` está bien configurado. Detrás de un proxy que oculta las direcciones de los clientes, todos parecen una sola IP y la ventana perdona también a un ladrón. Consulta [Despliegue](/operacion/despliegue/).
+</Aside>
+
+## Qué termina una sesión
+
+| Evento | Alcance |
+|--------|---------|
+| Logout | La sesión del token presentado |
+| Reutilización de un refresh token fuera de las reglas de gracia | Esa sesión |
+| Restablecer la contraseña | **Todas** las sesiones de la cuenta |
+| Cambiar la contraseña | **Todas** las sesiones de la cuenta, incluida la de quien llama |
+| `ops:revoke-all` (operador, tras comprometerse una clave) | Todas las sesiones de todas las apps |
+| 30 días desde el login, o 7 días con un refresh token sin usar | Esa sesión |
+
+Un access token ya emitido **sigue siendo válido hasta su `exp`** en todos los casos: Auth no mantiene una lista de tokens revocados. Un access token de otra app es un JWT válido pero se rechaza porque su `aud` no es el tuyo.
+
+## Qué sigue
+
+- [Protección contra abuso](/conceptos/proteccion-contra-abuso/): los bloqueos y límites que rodean al login y al refresh.
+- [Operaciones](/operacion/operaciones/): cómo revocar todas las sesiones y rotar claves.
