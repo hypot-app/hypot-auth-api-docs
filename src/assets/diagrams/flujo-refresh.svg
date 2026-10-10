@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 526 376" width="526" height="376" role="img" aria-labelledby="t d" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13">
+<title id="t">Rotación del refresh token</title>
+<desc id="d">El frontend presenta el refresh token R1 y Auth devuelve un access token nuevo y un refresh token R2, marcando R1 como usado. Si R1 se presenta de nuevo fuera de las reglas de gracia, Auth responde invalid_grant y revoca la sesión completa.</desc>
+<rect width="526" height="376" rx="8" fill="#f8fafc" stroke="#cbd5e1"/>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#1e293b"/></marker></defs>
+<line x1="95" y1="60" x2="95" y2="356" stroke="#94a3b8" stroke-dasharray="4 4"/>
+<rect x="25" y="20" width="140" height="34" rx="6" fill="#e0e7ff" stroke="#6366f1"/>
+<text x="95" y="41" text-anchor="middle" fill="#1e1b4b" font-weight="600">Tu frontend</text>
+<line x1="431" y1="60" x2="431" y2="356" stroke="#94a3b8" stroke-dasharray="4 4"/>
+<rect x="361" y="20" width="140" height="34" rx="6" fill="#e0e7ff" stroke="#6366f1"/>
+<text x="431" y="41" text-anchor="middle" fill="#1e1b4b" font-weight="600">hypot Auth</text>
+<line x1="95" y1="86" x2="425" y2="86" stroke="#1e293b" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="263" y="79" text-anchor="middle" fill="#0f172a">POST /auth/refresh (R1)</text>
+<line x1="431" y1="132" x2="101" y2="132" stroke="#1e293b" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#a)"/>
+<text x="263" y="125" text-anchor="middle" fill="#0f172a">access token nuevo + R2 (R1 queda usado)</text>
+<line x1="95" y1="178" x2="425" y2="178" stroke="#1e293b" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="263" y="171" text-anchor="middle" fill="#0f172a">POST /auth/refresh (R2)</text>
+<line x1="431" y1="224" x2="101" y2="224" stroke="#1e293b" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#a)"/>
+<text x="263" y="217" text-anchor="middle" fill="#0f172a">access token nuevo + R3 (R2 queda usado)</text>
+<line x1="95" y1="270" x2="425" y2="270" stroke="#1e293b" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="263" y="263" text-anchor="middle" fill="#0f172a">POST /auth/refresh (R1 otra vez)</text>
+<line x1="431" y1="316" x2="101" y2="316" stroke="#1e293b" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#a)"/>
+<text x="263" y="309" text-anchor="middle" fill="#0f172a">401 invalid_grant y la sesión se revoca</text>
+</svg>

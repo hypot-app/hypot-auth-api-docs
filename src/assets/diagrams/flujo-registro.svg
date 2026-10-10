@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 848 422" width="848" height="422" role="img" aria-labelledby="t d" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13">
+<title id="t">Registro y confirmación de correo</title>
+<desc id="d">El frontend envía el registro a Auth y recibe un 202 genérico. Auth envía un correo con un enlace a la pantalla de confirmación de la app con el token en el fragmento. El frontend lee el token, limpia la URL y llama a confirm; Auth responde 200.</desc>
+<rect width="848" height="422" rx="8" fill="#f8fafc" stroke="#cbd5e1"/>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#1e293b"/></marker></defs>
+<line x1="95" y1="60" x2="95" y2="402" stroke="#94a3b8" stroke-dasharray="4 4"/>
+<rect x="25" y="20" width="140" height="34" rx="6" fill="#e0e7ff" stroke="#6366f1"/>
+<text x="95" y="41" text-anchor="middle" fill="#1e1b4b" font-weight="600">Tu frontend</text>
+<line x1="424" y1="60" x2="424" y2="402" stroke="#94a3b8" stroke-dasharray="4 4"/>
+<rect x="354" y="20" width="140" height="34" rx="6" fill="#e0e7ff" stroke="#6366f1"/>
+<text x="424" y="41" text-anchor="middle" fill="#1e1b4b" font-weight="600">hypot Auth</text>
+<line x1="753" y1="60" x2="753" y2="402" stroke="#94a3b8" stroke-dasharray="4 4"/>
+<rect x="683" y="20" width="140" height="34" rx="6" fill="#e0e7ff" stroke="#6366f1"/>
+<text x="753" y="41" text-anchor="middle" fill="#1e1b4b" font-weight="600">Buzón de correo</text>
+<line x1="95" y1="86" x2="418" y2="86" stroke="#1e293b" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="259.5" y="79" text-anchor="middle" fill="#0f172a">POST /accounts/signup</text>
+<line x1="424" y1="132" x2="101" y2="132" stroke="#1e293b" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#a)"/>
+<text x="259.5" y="125" text-anchor="middle" fill="#0f172a">202 con texto genérico</text>
+<line x1="424" y1="178" x2="747" y2="178" stroke="#1e293b" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="588.5" y="171" text-anchor="middle" fill="#0f172a">enlace tu-url-de-confirmación#token=...</text>
+<line x1="753" y1="224" x2="101" y2="224" stroke="#1e293b" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#a)"/>
+<text x="424" y="217" text-anchor="middle" fill="#0f172a">la persona abre el enlace</text>
+<text x="103" y="270" fill="#334155" font-style="italic">lee location.hash y limpia la URL</text>
+<line x1="95" y1="316" x2="418" y2="316" stroke="#1e293b" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="259.5" y="309" text-anchor="middle" fill="#0f172a">POST /accounts/confirm {token}</text>
+<line x1="424" y1="362" x2="101" y2="362" stroke="#1e293b" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#a)"/>
+<text x="259.5" y="355" text-anchor="middle" fill="#0f172a">200 cuenta confirmada</text>
+</svg>

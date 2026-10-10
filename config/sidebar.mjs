@@ -9,6 +9,17 @@ export const sidebarSections = [
       { label: 'Inicio rápido', slug: 'inicio-rapido' },
     ],
   },
+  {
+    label: 'Para frontend',
+    items: [
+      { label: 'Registro y confirmación', slug: 'frontend/registro-y-confirmacion' },
+      { label: 'Login y almacenamiento de tokens', slug: 'frontend/login-y-tokens' },
+      { label: 'Refresh', slug: 'frontend/refresh' },
+      { label: 'Logout', slug: 'frontend/logout' },
+      { label: 'Recuperar y cambiar contraseña', slug: 'frontend/recuperar-y-cambiar-contrasena' },
+      { label: 'Manejo de errores', slug: 'frontend/manejo-de-errores' },
+    ],
+  },
 ];
 
 /** Label of the generated API reference group (starlight-openapi `sidebar.label`). */

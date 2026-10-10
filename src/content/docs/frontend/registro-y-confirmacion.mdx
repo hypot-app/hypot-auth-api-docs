@@ -1,0 +1,124 @@
+---
+title: "Registro y confirmación"
+description: "Cómo registrar una cuenta, leer el token del fragmento del enlace, limpiar la URL y confirmar el correo."
+---
+
+import { Aside, Code, TabItem, Tabs } from '@astrojs/starlight/components';
+import authClient from '../../../../examples/frontend/auth-client.js?raw';
+import passwordRules from '../../../../examples/frontend/password-rules.js?raw';
+import signup from '../../../../examples/frontend/signup.js?raw';
+import confirmPage from '../../../../examples/frontend/confirm-page.js?raw';
+import resend from '../../../../examples/frontend/resend.js?raw';
+import signupCurl from '../../../../examples/curl/signup.sh?raw';
+import mailpitToken from '../../../../examples/curl/mailpit-token.sh?raw';
+import confirmCurl from '../../../../examples/curl/confirm.sh?raw';
+import resendCurl from '../../../../examples/curl/resend-confirmation.sh?raw';
+
+**El registro tiene tres pasos: tu pantalla llama a `signup`, Auth envía un correo con un enlace a tu pantalla de confirmación y esa pantalla lee el token del fragmento (`#token=...`), lo borra de la URL y llama a `confirm`.** Auth no emite tokens de sesión al confirmar: después de confirmar, envía a la persona a tu pantalla de login.
+
+![Diagrama de secuencia del registro. El frontend llama a POST /accounts/signup y Auth responde 202 con un texto genérico. Auth envía al buzón un correo con el enlace a la URL de confirmación de la app y el token en el fragmento. La persona abre el enlace, el frontend lee location.hash y limpia la URL, y llama a POST /accounts/confirm con el token. Auth responde 200.](../../../assets/diagrams/flujo-registro.svg)
+
+## Cliente base
+
+Todos los ejemplos de frontend usan este cliente pequeño. Devuelve siempre el mismo formato (`ok`, `status`, `error`, `data`, `retryAfter`), convierte un fallo de red en el error `network_error` y nunca usa cookies.
+
+<Code code={authClient} lang="js" title="auth-client.js" />
+
+Todas las llamadas son JSON. Envía `Content-Type: application/json` en cada `POST` (otro tipo de contenido recibe `415`) y envía únicamente las cabeceras `Content-Type` y `Authorization`: la lista de cabeceras permitidas en CORS es fija.
+
+## Paso 1: registrar la cuenta
+
+<Tabs syncKey="lenguaje">
+  <TabItem label="fetch (navegador)">
+    <Code code={signup} lang="js" title="signup.js" />
+  </TabItem>
+  <TabItem label="curl">
+    <Code code={signupCurl} lang="sh" title="signup.sh" />
+  </TabItem>
+</Tabs>
+
+Auth responde `202` con el mismo cuerpo para un correo nuevo y para uno ya registrado:
+
+```json
+{ "message": "If this address can be registered, a confirmation email is on its way." }
+```
+
+Muestra una pantalla neutral, como "Revisa tu bandeja de entrada", y **nunca digas si el correo ya estaba registrado**. Si el correo ya existía, su dueño recibe un aviso de "la cuenta ya existe" con un enlace a tu `password_reset_url` y sin token.
+
+### Reglas de contraseña
+
+Valen para registro, restablecimiento y cambio: al menos 8 caracteres, como máximo 72 **bytes** UTF-8 y ningún carácter NUL. Los caracteres no ASCII ocupan más de un byte (una "é" ocupa 2), así que si aceptas contraseñas con acentos o emojis, muestra el límite en bytes. Validar en el formulario solo mejora la experiencia: Auth siempre vuelve a validar.
+
+<Code code={passwordRules} lang="js" title="password-rules.js" />
+
+## Paso 2: el enlace del correo
+
+El enlace tiene la forma `<email_confirmation_url>#token=<token>`:
+
+- El token viaja en el **fragmento**, por lo que no llega a servidores, registros ni cabeceras `Referer`. Un escáner de correo que abre el enlace no confirma nada, porque confirmar exige un `POST`.
+- Vale **24 horas** y se usa **una sola vez**. Un reenvío invalida el enlace anterior.
+- Las URL de confirmación y de restablecimiento salen del registro de la app, nunca de la petición.
+
+## Paso 3: confirmar desde tu pantalla
+
+Lee el token y limpia la URL **antes** de cargar scripts de terceros y antes de cualquier llamada de red.
+
+<Tabs syncKey="lenguaje">
+  <TabItem label="fetch (navegador)">
+    <Code code={confirmPage} lang="js" title="confirm-page.js" />
+  </TabItem>
+  <TabItem label="curl">
+    En desarrollo puedes sacar el token de Mailpit y confirmar con dos pasos:
+
+    <Code code={mailpitToken} lang="sh" title="mailpit-token.sh" />
+
+    <Code code={confirmCurl} lang="sh" title="confirm.sh" />
+  </TabItem>
+</Tabs>
+
+Si todo va bien, Auth responde `200 { "message": "Your email address has been confirmed." }`, marca la cuenta como confirmada y envía un correo de bienvenida.
+
+<Aside type="caution" title="Un error de red en confirm es un enlace inválido">
+En el navegador, Auth solo permite leer algunos fallos de `confirm`. Envía la cabecera CORS cuando el origen de tu página pertenece a la app dueña del token (un token usado o vencido). Un token mal formado, desconocido o de otra app recibe el mismo cuerpo `400`, pero **sin** cabecera CORS, así que `fetch` se rechaza con un error de red opaco. Trata un `fetch` rechazado en confirm igual que `invalid_or_expired_link`: muestra "Este enlace no es válido o venció" y el formulario de reenvío.
+</Aside>
+
+La pantalla de confirmación también debe funcionar cuando la persona llega desde "olvidé mi contraseña": si la cuenta no estaba confirmada, Auth envía un correo de **confirmación** en lugar de uno de restablecimiento.
+
+## Reenviar el correo de confirmación
+
+Ofrece esta acción en la pantalla de login y en la pantalla de enlace vencido, porque el login nunca dice que una cuenta está sin confirmar. Un reenvío invalida el enlace anterior y la respuesta es la misma exista o no la cuenta, esté o no confirmada.
+
+<Tabs syncKey="lenguaje">
+  <TabItem label="fetch (navegador)">
+    <Code code={resend} lang="js" title="resend.js" />
+  </TabItem>
+  <TabItem label="curl">
+    <Code code={resendCurl} lang="sh" title="resend-confirmation.sh" />
+  </TabItem>
+</Tabs>
+
+## Respuestas posibles
+
+| Caso | Respuesta | Qué mostrar |
+|------|-----------|-------------|
+| Cuerpo mal formado (campo ausente o que no es texto) | `400 invalid_request` | Es un error en tu código |
+| Entrada inválida (correo mal escrito, contraseña corta o demasiado larga, NUL) | `400 invalid_email` o `400 invalid_password` | Errores en el campo |
+| `client_id` desconocido o inactivo, u origen no asociado a la app | `400 invalid_client` | Error de configuración: es un fallo de tu integración, no del usuario |
+| La app no tiene las URL de correo configuradas | `400 unconfigured_client` | Contacta al operador |
+| Confirm: token inválido, usado, vencido o desconocido | `400 invalid_or_expired_link` | "Este enlace no es válido o venció", con formulario de reenvío |
+| Confirm: error de red o de CORS en el navegador | Sin respuesta legible | Igual que `invalid_or_expired_link` |
+| Límite por IP en signup, resend o confirm | `429 rate_limited` con `Retry-After` | Reintentar más tarde |
+
+Hay un límite silencioso adicional: signup, resend y forgot envían como máximo 3 correos por cuenta por hora (valor por defecto). Por encima de ese tope Auth sigue respondiendo `202` pero **no envía nada**. Tu interfaz debe decir algo como "Si no recibes el correo, revisa la carpeta de spam e inténtalo de nuevo más tarde".
+
+## Lista de verificación
+
+- [ ] Muestras el mismo mensaje neutral para cuentas nuevas y existentes.
+- [ ] La pantalla de confirmación lee `#token`, ejecuta `history.replaceState` y recién entonces hace la llamada.
+- [ ] No cargas scripts de terceros en esa pantalla antes de limpiar la URL.
+- [ ] Un `fetch` rechazado o `invalid_or_expired_link` muestra el enlace inválido con reenvío.
+- [ ] Muestras el límite de 72 bytes si aceptas contraseñas no ASCII.
+
+## Siguiente paso
+
+Continúa con [Login y almacenamiento de tokens](/frontend/login-y-tokens/).

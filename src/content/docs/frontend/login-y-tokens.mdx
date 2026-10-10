@@ -1,0 +1,110 @@
+---
+title: "Login y almacenamiento de tokens"
+description: "Cómo iniciar sesión, qué devuelve Auth y dónde guardar el access token y el refresh token en el navegador."
+---
+
+import { Aside, Code, TabItem, Tabs } from '@astrojs/starlight/components';
+import login from '../../../../examples/frontend/login.js?raw';
+import tokenStore from '../../../../examples/frontend/token-store.js?raw';
+import loginCurl from '../../../../examples/curl/login.sh?raw';
+import meCurl from '../../../../examples/curl/me.sh?raw';
+
+**El login devuelve un access token (JWT de 1 hora) y un refresh token en el cuerpo JSON; ninguno viaja en una cookie. Guarda el access token solo en memoria y elige con criterio dónde guardar el refresh token.** Ambos tokens están en el JSON porque Auth nunca envía `Set-Cookie`.
+
+## Iniciar sesión
+
+<Tabs syncKey="lenguaje">
+  <TabItem label="fetch (navegador)">
+    <Code code={login} lang="js" title="login.js" />
+  </TabItem>
+  <TabItem label="curl">
+    <Code code={loginCurl} lang="sh" title="login.sh" />
+  </TabItem>
+</Tabs>
+
+La respuesta correcta es:
+
+```json
+{ "access_token": "eyJ...", "token_type": "Bearer", "expires_in": 3600, "refresh_token": "Zk3..." }
+```
+
+- Los correos no distinguen mayúsculas de minúsculas.
+- No hay cabecera `Set-Cookie`. No uses `credentials: 'include'`.
+- No escribas `3600` en tu código: lee `expires_in`.
+
+### Un solo error de login
+
+Auth responde con el mismo `401 invalid_credentials` (mismo estado, cuerpo y cabeceras) para correo desconocido, contraseña incorrecta, cuenta sin confirmar, cuenta bloqueada, IP bloqueada, IP sobre su límite y `client_id` desconocido. Es deliberado: evita que alguien averigüe qué correos tienen cuenta. Muestra un único mensaje, como "Correo o contraseña incorrectos", y no intentes distinguir los casos. Si quieres ayudar a quien no confirmó su cuenta, ofrece un enlace genérico de "Reenviar correo de confirmación".
+
+| Caso | Respuesta |
+|------|-----------|
+| Cuerpo mal formado (campo ausente o que no es texto) | `400 invalid_request` |
+| Contraseña incorrecta, correo desconocido, cuenta sin confirmar o bloqueada, IP bloqueada o sobre su límite, `client_id` desconocido o inactivo, origen no asociado | `401 invalid_credentials`, idéntica para todos |
+| El almacén de contadores no responde | `503 temporarily_unavailable` |
+
+El login **nunca** devuelve `429`: un login limitado recibe el `401` genérico. Consulta [Protección contra abuso](/conceptos/proteccion-contra-abuso/) para ver los bloqueos que verán tus usuarios.
+
+## Dónde guardar cada token
+
+| Token | Duración | Dónde guardarlo |
+|-------|----------|-----------------|
+| Access token | 1 hora | **Solo en memoria** (una variable del módulo o el estado de tu app). Nunca en `localStorage`. |
+| Refresh token | 7 días sin uso y 30 días como máximo desde el login (valores por defecto) | Elige una de las opciones de la tabla siguiente. |
+
+Renueva el access token poco antes de que venza (por eso el almacén devuelve `null` con un margen de 60 segundos), en lugar de esperar un `401` en cada llamada.
+
+### Opciones para el refresh token
+
+| Opción | ¿Sobrevive a recargar? | Exposición ante XSS | Notas |
+|--------|------------------------|---------------------|-------|
+| Solo memoria | No | La más baja: el atacante debe ejecutarse durante la sesión | La persona vuelve a iniciar sesión tras cada recarga o pestaña nueva. Lo más seguro y simple. |
+| `sessionStorage` | Por pestaña | Un XSS puede leerlo y usarlo desde cualquier sitio hasta que rote o se revoque | Término medio razonable. |
+| `localStorage` | Sí, en todas las pestañas | Igual que arriba, durante más tiempo | La mejor experiencia. El atacante dispone de hasta 7 días de inactividad o 30 días absolutos, salvo que la detección de reutilización lo atrape. |
+| Cookie httpOnly mediante tu propio backend | Sí | JavaScript no puede leerla | No forma parte del contrato de Auth: Auth nunca envía cookies. Reintroduce CSRF y tu backend pasa a ser el cliente de Auth. Trátalo como una discusión de diseño con el equipo de Auth. |
+
+La rotación limita el daño: si un token robado y el cliente real lo usan, uno de los dos presentará un token ya usado y Auth revocará toda la sesión. Eso solo te protege si el token robado se usa mientras el cliente real sigue activo, así que mantén igualmente una política CSP estricta.
+
+### El almacén de tokens
+
+El código siguiente concentra la decisión en un solo lugar: por defecto el refresh token queda en memoria, y pasas un `storage` solo si decides conscientemente persistirlo.
+
+<Code code={tokenStore} lang="js" title="token-store.js" />
+
+Cuando una sesión termina, borra todos los tokens y las cachés de datos del usuario. Las situaciones que terminan una sesión son:
+
+- La persona cierra sesión.
+- Se presenta un refresh token reutilizado fuera de las reglas de gracia.
+- La persona restablece o cambia su contraseña: terminan **todas** las sesiones de la cuenta.
+- Un operador revoca todas las sesiones tras comprometerse una clave.
+- La sesión llega a 30 días, o un refresh token pasa 7 días sin usarse.
+
+## Consultar los datos de la cuenta
+
+`GET /api/v1/me` devuelve `id`, `email`, `email_verified` y `created_at`, exactamente esas cuatro claves. El `id` es el `sub` del token.
+
+<Tabs syncKey="lenguaje">
+  <TabItem label="fetch (navegador)">
+    Usa `client.me(accessToken)` del [cliente base](/frontend/registro-y-confirmacion/#cliente-base).
+  </TabItem>
+  <TabItem label="curl">
+    <Code code={meCurl} lang="sh" title="me.sh" />
+  </TabItem>
+</Tabs>
+
+Desde un navegador, `/me` también exige que el `Origin` sea uno de los orígenes permitidos de la app a la que pertenece el token (`aud`). Un token ausente, vencido o inválido recibe siempre el mismo `401 invalid_token` con `WWW-Authenticate: Bearer`.
+
+<Aside type="tip" title="Los perfiles son de tu app">
+Auth no guarda nombre, avatar ni otros datos de perfil. Mantén tu propia tabla de perfiles, enlazada a cada cuenta por `id` (el claim `sub`). Créala en el primer login o cuando confirmes la cuenta.
+</Aside>
+
+## Lista de verificación
+
+- [ ] El access token vive solo en memoria.
+- [ ] Elegiste el almacenamiento del refresh token de forma deliberada y lo documentaste.
+- [ ] Un único mensaje para `invalid_credentials`.
+- [ ] No usas `credentials: 'include'`.
+- [ ] No registras tokens ni contraseñas, ni siquiera en herramientas de errores.
+
+## Siguiente paso
+
+Continúa con [Refresh](/frontend/refresh/).
