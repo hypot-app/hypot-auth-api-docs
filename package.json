@@ -1,0 +1,30 @@
+{
+  "name": "hypot-auth-api-docs",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Documentation site for the hypot Auth API (Astro Starlight, Spanish)",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "test": "node --test --test-timeout=300000 --test-concurrency=1 \"test/**/*.test.js\"",
+    "test:unit": "node --test \"test/unit/**/*.test.js\"",
+    "test:snippets": "node --test --test-timeout=300000 --test-concurrency=1 \"test/snippets/**/*.test.js\""
+  },
+  "dependencies": {
+    "@astrojs/starlight": "0.42.6",
+    "astro": "7.3.8",
+    "starlight-links-validator": "0.27.0",
+    "starlight-openapi": "0.27.0"
+  },
+  "devDependencies": {
+    "@testcontainers/postgresql": "12.2.0",
+    "jose": "6.2.12",
+    "testcontainers": "12.2.0"
+  }
+}
