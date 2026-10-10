@@ -1,0 +1,66 @@
+---
+title: "Sobre esta documentación"
+description: "Cómo se construye esta documentación, cómo se prueban sus ejemplos contra la API real y cómo actualizarla cuando la API cambia."
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+**Esta documentación es un sitio estático de Astro Starlight, en español, que lee la especificación OpenAPI de la API desde un submódulo de git y muestra únicamente ejemplos de código que se prueban contra la API real.** Vive en su propio repositorio, `hypot-auth-api-docs`, y sus dependencias no se mezclan con las de la API.
+
+## Cómo está armada
+
+| Pieza | Decisión |
+|-------|----------|
+| Sitio | Astro con Starlight. Todo el contenido está en español neutro; las rutas de la API, el JSON, los códigos de error, los nombres de cabeceras y de variables de entorno se dejan como son. |
+| La API | Un submódulo de git en `api/`, apuntando a la rama `develop` de `hypot-app/hypot-auth-api`. No hay copias de sus archivos. |
+| Referencia de la API | La genera el complemento `starlight-openapi` a partir de `api/openapi.json`. Sus descripciones se quedan en inglés porque vienen de la especificación. |
+| Ejemplos de código | Cada fragmento está en su propio archivo bajo `examples/` y se importa en la página con `?raw`. El texto que lees y el código que se prueba son **el mismo archivo**. |
+| Diagramas | SVG estáticos en `src/assets/diagrams/`, con texto alternativo en cada página. |
+| Búsqueda | Pagefind, incluido en Starlight. Funciona sin servidor y sin servicios externos. |
+| Enlaces | `starlight-links-validator` hace fallar la compilación si algún enlace interno está roto. |
+| Despliegue | Una imagen de nginx sin privilegios con el sitio ya compilado, detrás del nginx del servidor. Se describe en el `README.md` del repositorio. |
+
+### Por qué SVG estáticos y no Mermaid
+
+Starlight no incluye Mermaid. Mermaid en el navegador necesita un script grande y estilos en línea, incompatibles con la política `script-src 'self'` de este sitio; y representarlo al compilar exige instalar un navegador completo (Playwright) en cada compilación. Cuatro diagramas de secuencia no justifican eso. Los SVG son archivos pequeños y accesibles, sin JavaScript, que se editan a mano.
+
+## Qué prueban los tests y qué no
+
+`npm test` levanta, con Testcontainers y Docker, Postgres 17, la imagen de la API construida desde el submódulo (`api/Dockerfile`) y Mailpit. Registra una app con la CLI del operador, lee los correos de confirmación y restablecimiento por la API HTTP de Mailpit y ejecuta los ejemplos.
+
+| Qué se prueba | Cómo |
+|---------------|------|
+| Ejemplos de frontend (`examples/frontend/*.js`) | Se ejecutan contra la API real: registro, confirmación, reenvío, login, almacenamiento de tokens, refresh con rotación, reintento tras una respuesta perdida, `429` con `Retry-After`, logout, recuperación y cambio de contraseña, y la tabla de errores. |
+| Ejemplos de backend (`examples/backend/*.js`) | Se verifican tokens reales de la API (incluido el rechazo de un token de otra app y de uno alterado) y, con un servidor JWKS local, `typ`, `iss`, vencimiento, solo RS256, `jku` ignorado, caché y rotación de claves. |
+| Scripts de curl (`examples/curl/*.sh`) | Se ejecutan dentro de un contenedor Alpine con curl y jq, en la misma red que la API, incluidos el token leído de Mailpit y el `429`. |
+| Comandos de la CLI (`examples/cli/*.sh`) | Se ejecutan los mismos argumentos con `node dist/cli.js` dentro de la imagen de la API. Se prueba también que el comando de migración es el del servicio `migrate` del compose de la API. |
+| Variables de entorno | La lista de [Configuración](/operacion/configuracion/) debe ser igual a la de `api/docs/env-example-additions.md`, sus valores por defecto deben ser los que devuelven los cargadores de la API y las reglas de validación se comprueban con valores reales. |
+| Afirmaciones de los conceptos | Una batería comprueba contra la API real lo que afirman las páginas de conceptos: respuestas genéricas, bloqueo de login, tope de correos, asociación de orígenes y rutas inexistentes. |
+| Operación | Rotación de claves con el retiro a los 4205 s, el ejemplo de entorno de producción arrancando en modo `production`, el comando `docker build` y el script de carga. |
+| Sitio | La barra lateral contiene todas las páginas planificadas, cada ejemplo se muestra en una página y se prueba, y la política CSP del contenedor coincide con los scripts en línea que genera la compilación. |
+
+### Qué no está cubierto
+
+- **El comportamiento real del navegador.** `navigator.locks` entre pestañas, `history.replaceState` y la limpieza real de la barra de direcciones, la aplicación de CORS por el navegador y los errores de red opacos no se pueden ejecutar en Node. Los ejemplos reciben `fetch`, `locks`, `location` y `history` como parámetros y las pruebas los ejecutan con simulaciones (`test/support/browser-stubs.js`). Para el navegador real está la prueba manual de `docs/smoke-test.md` del repositorio de la API.
+- **Un error de red de verdad en `confirm`.** Node no aplica CORS, así que la prueba simula con un `fetch` que falla el caso de un token desconocido.
+- **La misma IP que ve el servidor.** Las pruebas llegan siempre desde la misma dirección del puente de Docker; la comparación de IP de la ventana de gracia y el uso de `TRUST_PROXY` con un proxy real no se ejercitan.
+- **Los comandos de entorno** (`git clone`, `docker compose up`, `docker compose down`): los ejemplos `start-local-api.sh` y `stop-local-api.sh` no se ejecutan; el arnés levanta los mismos servicios con Testcontainers.
+- **El envío SMTP real.** Se usa Mailpit.
+- **La carga.** El script de carga se ejecuta con pocas peticiones y un umbral holgado para comprobar que funciona, no para medir rendimiento.
+
+## Actualizar la documentación cuando la API cambia
+
+1. Trae la versión nueva de la API: `git submodule update --remote api`.
+2. Revisa qué cambió: `git -C api log --oneline` y `git diff api` muestran las confirmaciones nuevas; compara `api/openapi.json` y `api/docs/`.
+3. Ejecuta `npm test`. Las pruebas fallan si cambió una respuesta, un código de error, un valor por defecto o una variable de entorno que la documentación afirma.
+4. Corrige las páginas y los ejemplos que fallen. La referencia de la API se actualiza sola al compilar.
+5. Ejecuta `npm run build` para validar los enlaces y la búsqueda.
+6. Confirma el puntero del submódulo junto con los cambios de contenido.
+
+<Aside type="caution" title="Si la documentación de la API contradice al código">
+La fuente de verdad es el código. Si encuentras una contradicción, sigue el código, deja la prueba que lo demuestra y avisa al equipo de la API; esta documentación no corrige el repositorio de la API.
+</Aside>
+
+## Accesibilidad
+
+Los encabezados siguen un orden jerárquico, los diagramas tienen texto alternativo y descripción, y cada diagrama se explica también en texto. El sitio no depende de JavaScript para leer el contenido, salvo la búsqueda, el copiado de código y la sincronización de pestañas.

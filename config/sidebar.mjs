@@ -20,12 +20,42 @@ export const sidebarSections = [
       { label: 'Manejo de errores', slug: 'frontend/manejo-de-errores' },
     ],
   },
+  {
+    label: 'Para backend',
+    items: [
+      { label: 'Validar access tokens con JWKS', slug: 'backend/validar-access-tokens' },
+      { label: 'Leer el usuario', slug: 'backend/leer-el-usuario' },
+    ],
+  },
+  {
+    label: 'Conceptos',
+    items: [
+      { label: 'Apps y orígenes', slug: 'conceptos/apps-y-origenes' },
+      { label: 'Sesiones y tokens', slug: 'conceptos/sesiones-y-tokens' },
+      { label: 'Protección contra abuso', slug: 'conceptos/proteccion-contra-abuso' },
+      { label: 'Seguridad', slug: 'conceptos/seguridad' },
+    ],
+  },
+  {
+    label: 'Operación',
+    items: [
+      { label: 'Despliegue', slug: 'operacion/despliegue' },
+      { label: 'Configuración', slug: 'operacion/configuracion' },
+      { label: 'Operaciones', slug: 'operacion/operaciones' },
+      { label: 'Capacidad y prueba de carga', slug: 'operacion/capacidad' },
+    ],
+  },
 ];
+
+export const aboutSection = {
+  label: 'Sobre esta documentación',
+  items: [{ label: 'Cómo se construye', slug: 'sobre-esta-documentacion' }],
+};
 
 /** Label of the generated API reference group (starlight-openapi `sidebar.label`). */
 export const referenceLabel = 'Referencia de la API';
 
 /** Flat list of every slug the sidebar links to. */
 export function sidebarSlugs() {
-  return sidebarSections.flatMap((section) => section.items.map((item) => item.slug));
+  return [...sidebarSections, aboutSection].flatMap((section) => section.items.map((item) => item.slug));
 }
