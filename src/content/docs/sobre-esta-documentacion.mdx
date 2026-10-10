@@ -18,11 +18,11 @@ import { Aside } from '@astrojs/starlight/components';
 | Diagramas | SVG estáticos en `src/assets/diagrams/`, con texto alternativo en cada página. |
 | Búsqueda | Pagefind, incluido en Starlight. Funciona sin servidor y sin servicios externos. |
 | Enlaces | `starlight-links-validator` hace fallar la compilación si algún enlace interno está roto. |
-| Despliegue | Una imagen de nginx sin privilegios con el sitio ya compilado, detrás del nginx del servidor. Se describe en el `README.md` del repositorio. |
+| Ejecución | Uso local: `astro dev`, `astro preview` o un contenedor que sirve el sitio compilado con `astro preview`. Se describe en el `README.md` del repositorio. |
 
 ### Por qué SVG estáticos y no Mermaid
 
-Starlight no incluye Mermaid. Mermaid en el navegador necesita un script grande y estilos en línea, incompatibles con la política `script-src 'self'` de este sitio; y representarlo al compilar exige instalar un navegador completo (Playwright) en cada compilación. Cuatro diagramas de secuencia no justifican eso. Los SVG son archivos pequeños y accesibles, sin JavaScript, que se editan a mano.
+Starlight no incluye Mermaid. Mermaid en el navegador necesita un script grande y estilos en línea; y representarlo al compilar exige instalar un navegador completo (Playwright) en cada compilación. Cuatro diagramas de secuencia no justifican eso. Los SVG son archivos pequeños y accesibles, sin JavaScript, que se editan a mano.
 
 ## Qué prueban los tests y qué no
 
@@ -37,7 +37,7 @@ Starlight no incluye Mermaid. Mermaid en el navegador necesita un script grande 
 | Variables de entorno | La lista de [Configuración](/operacion/configuracion/) debe ser igual a la de `api/docs/env-example-additions.md`, sus valores por defecto deben ser los que devuelven los cargadores de la API y las reglas de validación se comprueban con valores reales. |
 | Afirmaciones de los conceptos | Una batería comprueba contra la API real lo que afirman las páginas de conceptos: respuestas genéricas, bloqueo de login, tope de correos, asociación de orígenes y rutas inexistentes. |
 | Operación | Rotación de claves con el retiro a los 4205 s, el ejemplo de entorno de producción arrancando en modo `production`, el comando `docker build` y el script de carga. |
-| Sitio | La barra lateral contiene todas las páginas planificadas, cada ejemplo se muestra en una página y se prueba, y la política CSP del contenedor coincide con los scripts en línea que genera la compilación. |
+| Sitio | La barra lateral contiene todas las páginas planificadas, cada ejemplo se muestra en una página y se prueba, y la compilación pasa con la validación de enlaces. |
 
 ### Qué no está cubierto
 

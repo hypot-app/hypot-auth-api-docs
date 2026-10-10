@@ -1,4 +1,4 @@
-# Documentation site behind the host's nginx.
+# Documentation site for local use, served by `astro preview` at http://localhost:4321
 #   docker compose up -d --build
 # To update: git pull, git submodule update --init, and the same command again.
 services:
@@ -9,18 +9,14 @@ services:
     image: hypot-auth-api-docs:local
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8081:8080"
-    read_only: true
-    tmpfs:
-      - /tmp
+      - "127.0.0.1:4321:4321"
     cap_drop:
       - ALL
     security_opt:
       - no-new-privileges:true
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8080/"]
-      interval: 30s
-      timeout: 3s
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4321/').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
       retries: 3
-    mem_limit: 128m
-    pids_limit: 64
