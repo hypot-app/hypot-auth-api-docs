@@ -30,8 +30,13 @@ export function createRefresher({
       // 429 no es una sesión muerta: conserva los tokens y reintenta tras Retry-After.
       return { status: 'rate_limited', retryAfter: result.retryAfter };
     }
-    store.clear(); // invalid_grant, o el reintento también falló: vuelve a iniciar sesión
-    return { status: 'logged_out', reason: result.error };
+    if (result.status === 401 && result.error === 'invalid_grant') {
+      store.clear(); // la sesión ya no existe: vuelve a iniciar sesión
+      return { status: 'logged_out', reason: 'invalid_grant' };
+    }
+    // 503, 5xx, red caída tras el reintento o un error desconocido: es una caída, no una sesión muerta.
+    // Conserva los tokens y deja que quien llama reintente más tarde.
+    return { status: 'unavailable' };
   }
 
   function refresh() {

@@ -315,9 +315,10 @@ describe('refresh with rotation', () => {
     assert.equal((await refresher.refresh()).status, 'ok'); // the session survived
   });
 
-  it('gives up after a second network failure and asks for a new login', async () => {
+  it('keeps the tokens after a second network failure and reports the service as unavailable', async () => {
     const email = await confirmedAccount(clientFor(), 'offline');
     const { store } = await openTab({ email });
+    const kept = store.getRefreshToken();
     let attempts = 0;
     const down = createAuthClient({
       authUrl: stack.authUrl,
@@ -328,9 +329,31 @@ describe('refresh with rotation', () => {
       },
     });
     const refresher = createRefresher({ client: down, store, clientId: stack.clientId, locks: createLocks(), retryDelayMs: 0 });
-    assert.deepEqual(await refresher.refresh(), { status: 'logged_out', reason: 'network_error' });
+    assert.deepEqual(await refresher.refresh(), { status: 'unavailable' });
     assert.equal(attempts, 2); // the first try plus a single retry, never a loop
-    assert.equal(store.getRefreshToken(), null);
+    assert.equal(store.getRefreshToken(), kept); // an outage is not a dead session
+  });
+
+  it('keeps the tokens on a 503 and reports the service as unavailable', async () => {
+    const email = await confirmedAccount(clientFor(), 'unavail');
+    const { store } = await openTab({ email });
+    const kept = store.getRefreshToken();
+    let attempts = 0;
+    const failing = createAuthClient({
+      authUrl: stack.authUrl,
+      clientId: stack.clientId,
+      fetch: async () => {
+        attempts += 1;
+        return new Response(JSON.stringify({ error: 'temporarily_unavailable' }), {
+          status: 503,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      },
+    });
+    const refresher = createRefresher({ client: failing, store, clientId: stack.clientId, locks: createLocks(), retryDelayMs: 0 });
+    assert.deepEqual(await refresher.refresh(), { status: 'unavailable' });
+    assert.equal(attempts, 1); // a response arrived: no retry
+    assert.equal(store.getRefreshToken(), kept);
   });
 
   it('on invalid_grant clears the tokens and asks for a new login', async () => {

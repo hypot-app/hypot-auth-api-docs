@@ -18,7 +18,7 @@ import rateLimited from '../../../../examples/curl/rate-limited.sh?raw';
 | 400 | `invalid_request` | Todo endpoint con cuerpo | Faltan campos o no son texto. Es un error en tu código. |
 | 415 | `unsupported_media_type` | Todo `POST` | El `Content-Type` no es `application/json` (o falta). Un sufijo `; charset=utf-8` es válido. Esta respuesta no lleva cabecera CORS, así que un navegador la muestra como error de red. |
 | 400 | `invalid_email`, `invalid_password` | `invalid_email`: signup, resend, forgot. `invalid_password`: signup, reset, change | Fallo de validación. Es seguro mostrarlo al usuario. |
-| 400 | `invalid_client` | Signup, resend, forgot, refresh | `client_id` desconocido o inactivo, o (salvo en refresh) origen no asociado. Es un error de configuración. |
+| 400 | `invalid_client` | Signup, resend, forgot, refresh | `client_id` desconocido o inactivo, o (salvo en refresh) origen no asociado. Es un error de configuración. En refresh esta respuesta no lleva cabeceras CORS: el navegador la ve como un error de red (`network_error`), no como `invalid_client`. |
 | 400 | `unconfigured_client` | Signup, resend, forgot | La app no tiene las URL de correo. Contacta al operador. |
 | 400 | `invalid_or_expired_link` | Confirm, reset | Token desconocido, usado, vencido o reemplazado, o un origen incorrecto |
 | 400 | `invalid_current_password` | Change | Contraseña actual incorrecta (también durante un bloqueo). No es un problema de sesión. |
@@ -56,13 +56,13 @@ Un `fetch` rechazado significa que no hay respuesta legible: red caída, tiempo 
 | Llamada | Cómo tratar `network_error` |
 |---------|-----------------------------|
 | Confirm y reset | Igual que `invalid_or_expired_link`: Auth no envía cabecera CORS para un token desconocido o de otra app, y el navegador lo ve como error de red. Muestra "Este enlace no es válido o venció" con el formulario de reenvío. |
-| Refresh | Una respuesta posiblemente perdida: reintenta **una** vez (ver [Refresh](/frontend/refresh/)). |
+| Refresh | Una respuesta posiblemente perdida: reintenta **una** vez (ver [Refresh](/frontend/refresh/)). Si el reintento también falla, conserva los tokens y reintenta más tarde: no es una sesión muerta. |
 | Login, signup y demás | Muestra "No se pudo conectar. Inténtalo de nuevo" sin culpar a la persona. |
 | Logout | Limpia los tokens locales de todos modos. |
 
 ## `503` y reintentos
 
-Si el almacén del limitador no está disponible, los endpoints de credenciales fallan cerrados con `503`. Reintenta con espera creciente y muestra "Inténtalo más tarde". No reintentes en un bucle cerrado.
+Si el almacén del limitador no está disponible, los endpoints de credenciales fallan cerrados con `503`. Reintenta con espera creciente y muestra "Inténtalo más tarde". En refresh, un `503` no cierra la sesión: conserva los tokens. No reintentes en un bucle cerrado.
 
 ## El silencioso tope de correos por cuenta
 

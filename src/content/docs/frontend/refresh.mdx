@@ -33,10 +33,11 @@ Un refresh correcto devuelve el mismo formato que el login: `access_token`, `tok
 | `Origin` no asociado a tu `client_id` | El mismo `401 invalid_grant` (la respuesta nunca revela si un token es válido). Si todos tus refresh fallan así, revisa los orígenes permitidos. |
 | Token usado o revocado | El mismo `401`, y además se revoca la sesión completa (salvo el caso de gracia) |
 | Cuerpo mal formado | `400 invalid_request` |
-| `client_id` desconocido o inactivo | `400 invalid_client` (un error de configuración) |
+| `client_id` desconocido o inactivo | `400 invalid_client` (un error de configuración). Esta respuesta no lleva cabeceras CORS, así que el navegador la muestra como un error de red (`network_error`), no como `invalid_client`. |
+| Almacén del limitador caído | `503 temporarily_unavailable`. No es una sesión muerta: conserva los tokens y reintenta más tarde. |
 | Límite por IP | `429 rate_limited` con `Retry-After`. **No** es `invalid_grant`: conserva la sesión y reintenta tras la espera. |
 
-Ante `invalid_grant`, borra tus tokens y envía a la persona al login. No dejes escritas en tu código las duraciones (30 días de sesión y 7 sin uso son los valores por defecto del operador): lee `expires_in` y trata cualquier `invalid_grant` como "inicia sesión otra vez".
+Ante `invalid_grant`, borra tus tokens y envía a la persona al login. **Solo** ese error cierra la sesión: un `503`, un `5xx`, una caída de red tras el reintento o un error desconocido no prueban que la sesión haya muerto. En esos casos conserva los tokens y reintenta más tarde (`refresh.js` devuelve `{ status: 'unavailable' }`). No dejes escritas en tu código las duraciones (30 días de sesión y 7 sin uso son los valores por defecto del operador): lee `expires_in` y trata cualquier `invalid_grant` como "inicia sesión otra vez".
 
 ## Serializar los refresh
 
@@ -48,6 +49,8 @@ El código combina dos mecanismos:
 2. **`navigator.locks`**: un candado compartido entre pestañas. Dentro del candado se **vuelve a leer** el token almacenado, porque otra pestaña pudo rotarlo mientras esperabas.
 
 <Code code={refresh} lang="js" title="refresh.js" />
+
+`navigator.locks` solo existe en un **contexto seguro** (`https://` o `http://localhost`). En una página servida por `http` en otro host, `navigator.locks` es `undefined` y `createRefresher` fallará al renovar: sirve tu aplicación por HTTPS.
 
 Si tus pestañas no comparten almacenamiento (tokens solo en memoria), cada pestaña tiene su propia sesión y no hay nada que coordinar.
 
@@ -69,7 +72,7 @@ La ventana es una configuración del servidor (10 s por defecto): no la escribas
 Reglas del reintento (ya aplicadas en `refresh.js`):
 
 - Reintenta como máximo **una vez** por token, y solo cuando el primer intento terminó sin respuesta HTTP (error de red o tiempo agotado). Nunca después de un `401` y nunca en bucle.
-- Si el reintento también falla (`invalid_grant`, o una caída de red que supera la ventana), trátalo como "inicia sesión otra vez". Un reintento tardío desde otra red o fuera de la ventana revoca la sesión.
+- Si el reintento responde `invalid_grant` (fuera de la ventana o desde otra red), la sesión se revocó: borra los tokens y pide iniciar sesión. Si el reintento también termina sin respuesta, no borres nada: `refresh.js` devuelve `{ status: 'unavailable' }` y conserva el token por si el primer intento sí llegó a procesarse. Reintenta más tarde; si la caída supera la ventana, el siguiente intento recibirá `invalid_grant`.
 - Un `429` no es una respuesta perdida: espera `Retry-After` y reintenta el mismo token.
 - Tras un reintento correcto, reemplaza el token almacenado como en un refresh normal.
 
@@ -92,7 +95,7 @@ Con demasiados refresh desde una misma IP, Auth responde `429 rate_limited` con 
 - [ ] Relees el token almacenado dentro del candado.
 - [ ] Reemplazas el refresh token antes que cualquier otra cosa.
 - [ ] Reintentas como máximo una vez, y solo tras un error de red.
-- [ ] Un `429` no cierra la sesión.
+- [ ] Un `429`, un `503` o una caída de red no cierran la sesión: conservas los tokens.
 - [ ] Ante `invalid_grant` borras tokens y envías al login.
 
 ## Siguiente paso
