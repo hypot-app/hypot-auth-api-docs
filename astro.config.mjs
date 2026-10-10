@@ -6,7 +6,6 @@ import starlightOpenAPI, { openAPISidebarGroups } from 'starlight-openapi';
 import { aboutSection, referenceLabel, sidebarSections } from './config/sidebar.mjs';
 
 export default defineConfig({
-  // Never inline CSS in the HTML: the Content-Security-Policy of the container does not allow inline styles.
   // Never inline CSS or small scripts in the HTML: the Content-Security-Policy of the container allows
   // only same-origin files plus the hashes of the few inline scripts that Starlight itself writes.
   build: { inlineStylesheets: 'never' },

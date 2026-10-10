@@ -1,5 +1,5 @@
 // Recomputes the hashes of the inline scripts in dist/ and rewrites the CSP in docker/security-headers.conf.
-// Run it after `npm run build` whenever test/unit/csp.test.js reports that the hashes changed
+// Run it after `npm run build` whenever test/unit/site-build.test.js reports that the hashes changed
 // (for example after upgrading Starlight), and review the diff.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';

@@ -1,5 +1,5 @@
 // Content-Security-Policy of the container, built from what the compiled site actually needs.
-// Used by scripts/update-csp.mjs (writes docker/security-headers.conf) and by test/unit/csp.test.js (checks it).
+// Used by scripts/update-csp.mjs (writes docker/security-headers.conf) and by test/unit/site-build.test.js (checks it).
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
