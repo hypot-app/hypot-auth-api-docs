@@ -8,5 +8,4 @@
 !src
 !public
 !examples
-!docker
 !api/openapi.json
