@@ -1,0 +1,68 @@
+---
+title: "Leer el usuario"
+description: "Cuándo usar el claim sub del token y cuándo llamar a GET /me para obtener los datos de la cuenta."
+---
+
+import { Aside, Code, TabItem, Tabs } from '@astrojs/starlight/components';
+import readUser from '../../../../examples/backend/read-user.js?raw';
+import meCurl from '../../../../examples/curl/me.sh?raw';
+
+**Para autenticar a una persona no necesitas `/me`: verifica el JWT y usa `sub` como id de la cuenta. Llama a `/me` solo cuando necesites el correo, el indicador `email_verified` o confirmar en ese instante que la cuenta y la app siguen existiendo.**
+
+## `sub` o `/me`
+
+| Necesitas | Usa | Motivo |
+|-----------|-----|--------|
+| Saber quién llama y enlazar con tu tabla de perfiles | `sub` del token verificado | Es local, sin red, y es igual al `id` de la cuenta |
+| El correo o `email_verified` | `GET /api/v1/me` | El token no los incluye |
+| Confirmar que la cuenta sigue existiendo y la app sigue activa | `GET /api/v1/me` | Consulta a Auth. **No** detecta un logout ni un cambio de contraseña: un access token ya emitido sigue funcionando en `/me` hasta su `exp` |
+| Roles o permisos | Tu propia base de datos | Auth no los guarda |
+
+`/me` no tiene límite de frecuencia, pero cada llamada es una ida y vuelta a Auth: no la pongas en cada petición.
+
+## Llamar a `/me` desde tu backend
+
+<Tabs syncKey="lenguaje">
+  <TabItem label="Node + jose">
+    <Code code={readUser} lang="js" title="read-user.js" />
+
+    La función devuelve `null` para el `401` genérico y lanza un error ante cualquier otro fallo. El backend no envía `Origin`, así que no se aplica la asociación de CORS.
+  </TabItem>
+  <TabItem label="curl">
+    <Code code={meCurl} lang="sh" title="me.sh" />
+  </TabItem>
+</Tabs>
+
+La respuesta correcta tiene **exactamente cuatro claves**:
+
+```json
+{ "id": "7f0c...", "email": "ana@example.com", "email_verified": true, "created_at": "2026-10-05T15:04:05.000Z" }
+```
+
+`id` es el id de la cuenta y es igual al `sub` del token. `created_at` es ISO 8601 en UTC. La respuesta lleva `Cache-Control: no-store`.
+
+## El `401` de `/me`
+
+Un token ausente, vencido, con firma mala, de `typ` o algoritmo incorrectos, o cuyo `aud` no sea una app activa recibe siempre la misma respuesta, sin importar la causa:
+
+```json
+{ "error": "invalid_token", "message": "Missing or invalid access token" }
+```
+
+con la cabecera `WWW-Authenticate: Bearer`. Desde un navegador, además, el `Origin` debe ser uno de los permitidos de la app a la que pertenece el token (`aud`); desde cualquier otro origen se obtiene el mismo `401`, sin `Access-Control-Allow-Origin`.
+
+<Aside type="tip" title="Perfiles">
+Auth guarda identidad y credenciales (id, correo, verificación y fecha de creación). Todo lo demás es de tu app: crea tu fila de perfil en el primer login o cuando confirmes la cuenta, usando `sub` como clave.
+</Aside>
+
+## Lista de verificación
+
+- [ ] Autenticas con el JWT verificado, no con `/me` en cada petición.
+- [ ] No usas `/me` para detectar un logout: no lo detecta.
+- [ ] Tratas el `401` de `/me` como "sesión no válida" sin interpretar la causa.
+- [ ] Tu tabla de perfiles usa `sub` como clave foránea.
+- [ ] Nunca registras access tokens.
+
+## Siguiente paso
+
+Entiende el modelo detrás de estos endpoints en [Apps y orígenes](/conceptos/apps-y-origenes/).
