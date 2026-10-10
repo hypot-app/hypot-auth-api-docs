@@ -4,7 +4,8 @@ Documentación en español de la API de autenticación [hypot Auth](https://gith
 
 Lo importante:
 
-- **La API es un submódulo de git** (`api/`). El sitio lee `api/openapi.json`; no hay copias.
+- **La API es un submódulo de git** (`api/`). El sitio lee `api/openapi.json`; no hay copias. El repositorio `hypot-auth-api` es privado: para clonar el submódulo necesitas credenciales de GitHub con acceso a él.
+- **La documentación está en español, pero la referencia de la API está en inglés**, porque se genera tal cual desde `openapi.json`.
 - **Cada fragmento de código de las páginas es un archivo de `examples/`** que `npm test` ejecuta contra la API real (Postgres 17, la imagen de la API y Mailpit, con Testcontainers).
 - **El sitio es autoalojado**: sin CDN ni servicios externos. Se despliega como una imagen de nginx sin privilegios detrás del nginx del servidor.
 
@@ -114,7 +115,7 @@ La imagen se construye en dos etapas: una etapa con Node 24 compila el sitio y u
    sudo certbot --nginx -d docs.example.com
    ```
 
-   Certbot agrega la redirección a HTTPS y los certificados. Si quieres HSTS, agrega `add_header Strict-Transport-Security "max-age=31536000" always;` en el bloque `server` que escucha en el puerto 443.
+   Certbot agrega la redirección a HTTPS y los certificados. Recomendamos activar HSTS (cuidado: `includeSubDomains` obliga a que todos los subdominios usen HTTPS); agrega `add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;` en el bloque `server` que escucha en el puerto 443.
 
 4. **Opcional: restringir el acceso.** La documentación describe toda la API, así que conviene considerarlo. Dentro del bloque `location /` del nginx del servidor usa una lista de IP permitidas ([`deploy/host-nginx-allowlist.conf`](deploy/host-nginx-allowlist.conf)):
 
@@ -146,6 +147,10 @@ El contenedor envía una política CSP estricta (`docker/security-headers.conf`)
 | `base-uri`, `form-action`, `object-src`, `frame-ancestors` | `'none'` | El sitio no usa base, formularios ni plugins, y no se puede enmarcar |
 
 **Los hashes se verifican en cada prueba.** `npm test` compila el sitio y compara los scripts en línea del resultado con los hashes de `docker/security-headers.conf`. Si una actualización de Starlight cambia un script en línea, la prueba falla en lugar de dejar la búsqueda o el tema rotos en producción. Entonces ejecuta `npm run build && npm run csp:update`, revisa qué script cambió y confirma el archivo.
+
+## Seguridad de las dependencias
+
+`npm audit` reporta un aviso en `postcss-selector-parser` (dependencia de Starlight). Lo aceptamos: solo se usa durante la compilación y no forma parte del sitio publicado, que son archivos estáticos sin ese código.
 
 ## Licencia
 
