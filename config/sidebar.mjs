@@ -6,6 +6,7 @@ export const sidebarSections = [
     label: 'Inicio',
     items: [
       { label: 'Qué es hypot Auth', slug: 'index' },
+      { label: 'Inicio rápido', slug: 'inicio-rapido' },
     ],
   },
 ];

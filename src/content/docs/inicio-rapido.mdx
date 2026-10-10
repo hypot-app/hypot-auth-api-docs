@@ -1,0 +1,88 @@
+---
+title: Inicio rápido
+description: Levanta el stack local de hypot Auth, registra una app y recorre registro, confirmación y login con curl.
+---
+
+import { Aside, Code, Steps } from '@astrojs/starlight/components';
+import startLocal from '../../../examples/shell/start-local-api.sh?raw';
+import stopLocal from '../../../examples/shell/stop-local-api.sh?raw';
+import appCreate from '../../../examples/cli/app-create.sh?raw';
+import env from '../../../examples/curl/quickstart-env.sh?raw';
+import signup from '../../../examples/curl/signup.sh?raw';
+import mailpitToken from '../../../examples/curl/mailpit-token.sh?raw';
+import confirm from '../../../examples/curl/confirm.sh?raw';
+import login from '../../../examples/curl/login.sh?raw';
+import me from '../../../examples/curl/me.sh?raw';
+
+**En unos minutos tendrás una API local, una app registrada y una cuenta que inicia sesión.** Este recorrido usa solo Docker y curl. Cada bloque de código es un archivo de `examples/` de este repositorio y una prueba lo ejecuta contra la API real.
+
+## Antes de empezar
+
+- Docker con Compose.
+- `curl` y [`jq`](https://jqlang.org/) en tu terminal. Los scripts están escritos para `sh`, así que sirven en Linux, macOS y en Git Bash o WSL en Windows.
+- Pega los bloques directamente en tu terminal (no los ejecutes con `sh archivo`), porque algunos dejan variables que el siguiente bloque usa.
+
+<Steps>
+
+1. **Levanta el stack local de la API.**
+
+   <Code code={startLocal} lang="sh" title="start-local-api.sh" />
+
+   Siempre usa `--build`. Sin esa opción, Compose reutiliza una imagen vieja que ejecuta migraciones y código antiguos.
+
+   | Servicio | Dirección |
+   |----------|-----------|
+   | API | `http://localhost:3000` |
+   | Mailpit (bandeja de correo de desarrollo) | `http://localhost:8025` |
+   | Postgres | localhost:5432 (credenciales solo de desarrollo, ver `compose.yaml` de la API) |
+
+   Este `compose.yaml` es solo de desarrollo (URL `http`, `NODE_ENV=development`, secretos de desarrollo). No lo uses para desplegar: para eso lee [Despliegue](/operacion/despliegue/).
+
+2. **Registra una app.** Las apps se registran con la CLI del operador; no existe un endpoint HTTP para eso.
+
+   <Code code={appCreate} lang="sh" title="app-create.sh" />
+
+   La CLI imprime `client_id: app_...`. Cópialo. El `client_id` es público y no es un secreto.
+
+   <Aside type="caution" title="Las dos URL son obligatorias">
+   `--email-confirmation-url` y `--password-reset-url` son obligatorias al crear la app, y el origen de cada una debe estar entre los `--origin`. Si falta alguna, el comando termina con error y no guarda nada. Más detalle en [Apps y orígenes](/conceptos/apps-y-origenes/).
+   </Aside>
+
+3. **Define las variables del recorrido.** Reemplaza `CLIENT_ID` por el valor del paso anterior.
+
+   <Code code={env} lang="sh" title="quickstart-env.sh" />
+
+4. **Registra una cuenta.** La respuesta es un `202` con un texto fijo, exista o no el correo.
+
+   <Code code={signup} lang="sh" title="signup.sh" />
+
+5. **Lee el token del correo.** Auth envía el correo en segundo plano (cada 2 segundos). En desarrollo lo recibe Mailpit; este script lee el correo más reciente y extrae el valor de `#token=` del enlace. También puedes abrir `http://localhost:8025` y copiarlo a mano.
+
+   <Code code={mailpitToken} lang="sh" title="mailpit-token.sh" />
+
+6. **Confirma la cuenta.** Es un `POST` con el token en el cuerpo. El token vale 24 horas y se usa una sola vez.
+
+   <Code code={confirm} lang="sh" title="confirm.sh" />
+
+   Una cuenta sin confirmar no puede iniciar sesión.
+
+7. **Inicia sesión.** Obtienes un access token de 1 hora y un refresh token. Copia el valor de `access_token` en la variable `ACCESS_TOKEN` de tu terminal.
+
+   <Code code={login} lang="sh" title="login.sh" />
+
+8. **Consulta la cuenta.**
+
+   <Code code={me} lang="sh" title="me.sh" />
+
+   Devuelve exactamente cuatro campos: `id`, `email`, `email_verified` y `created_at`.
+
+</Steps>
+
+## Cuando termines
+
+<Code code={stopLocal} lang="sh" title="stop-local-api.sh" />
+
+## Siguiente paso
+
+- Construye las pantallas de tu app con la guía de [registro y confirmación](/frontend/registro-y-confirmacion/).
+- Valida los tokens en tu servidor con [Validar access tokens con JWKS](/backend/validar-access-tokens/).

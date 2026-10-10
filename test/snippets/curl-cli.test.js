@@ -59,6 +59,18 @@ describe('quick start with curl', () => {
   const email = uniqueEmail('curl');
   let tokens;
 
+  it('quickstart-env.sh defines the variables that the other scripts read', async () => {
+    const result = await tools.exec(['sh', '-c', '. /snippets/quickstart-env.sh && printf "%s|%s|%s|%s|%s" "$AUTH_URL" "$MAILPIT_URL" "$CLIENT_ID" "$EMAIL" "$PASSWORD"']);
+    assert.equal(result.exitCode, 0, result.output);
+    assert.deepEqual(result.stdout.split('|'), [
+      'http://localhost:3000',
+      'http://localhost:8025',
+      'app_REEMPLAZA_CON_TU_CLIENT_ID',
+      'ana@example.com',
+      'correct horse battery',
+    ]);
+  });
+
   it('signup answers 202 with the fixed message', async () => {
     const body = await json('signup.sh', { EMAIL: email, PASSWORD });
     assert.equal(body.message, 'If this address can be registered, a confirmation email is on its way.');
