@@ -1,0 +1,66 @@
+---
+title: "Configuración"
+description: "Todas las variables de entorno de la API de hypot Auth con sus valores por defecto y reglas de validación."
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import EnvTable from '../../../components/EnvTable.astro';
+
+**La API se configura solo con variables de entorno y las valida al arrancar: si una falta o es inválida, el proceso termina con un error que nombra la variable y la regla, nunca el valor.** Las tablas se mantienen junto con una prueba que las compara con los cargadores de configuración de la API y con su lista `env-example-additions.md`.
+
+<Aside type="note" title="Cómo leer las tablas">
+"Obligatoria" significa que el servicio no arranca sin ella. "Por defecto" es el valor que usa el servicio cuando no la defines. La tabla de límites de abuso sigue el patrón `ABUSE_<ÁMBITO>_LIMIT`, `ABUSE_<ÁMBITO>_WINDOW_SECONDS` y, solo para los dos ámbitos de bloqueo de login, `ABUSE_<ÁMBITO>_BLOCK_SECONDS`.
+</Aside>
+
+## Variables
+
+### Ejecución
+
+<EnvTable group="ejecucion" />
+
+### Emisor
+
+<EnvTable group="emisor" />
+
+El emisor se copia tal cual en el claim `iss` y de él sale la URL de la JWKS. Los consumidores comparan ambos valores de forma exacta, así que entrega a cada app la cadena exacta.
+
+### Correo (SMTP)
+
+<EnvTable group="correo" />
+
+Los correos salen de una cola en Postgres (`email_outbox`) y los envía un proceso en segundo plano. El remitente de una app (`--email-from`) reemplaza a `MAIL_FROM`.
+
+### Claves de firma
+
+<EnvTable group="claves" />
+
+Define **exactamente una** de las dos. El servicio rechaza arrancar si el conjunto de claves es inválido (JSON mal formado, clave privada ausente o que no corresponde, `kid` duplicado, clave RSA de menos de 2048 bits) o si no defines ninguna o defines ambas. Solo el proceso de la API lee estas variables: la CLI del operador arranca sin ellas. El formato del conjunto está descrito en [Operaciones](/operacion/operaciones/#rotación-de-claves-de-firma).
+
+### Proxy inverso
+
+<EnvTable group="proxy" />
+
+### Límites de abuso
+
+Todos los valores son enteros positivos y el valor de la tabla es el que se usa por defecto. Para entender cada ámbito, consulta [Protección contra abuso](/conceptos/proteccion-contra-abuso/).
+
+<EnvTable group="abuso" />
+
+### Sesiones
+
+<EnvTable group="sesiones" />
+
+### Capacidad
+
+<EnvTable group="capacidad" />
+
+## Constantes del código (no son variables)
+
+| Constante | Valor | Dónde |
+|-----------|-------|-------|
+| `DB_POOL_MAX` | 10 conexiones por proceso | `src/platform/persistence/typeorm.options.ts` |
+| `DB_CONNECTION_TIMEOUT_MS` | 5000 ms de espera por una conexión libre | `src/platform/persistence/typeorm.options.ts` |
+
+## Siguiente paso
+
+Consulta el ejemplo de entorno de producción en [Despliegue](/operacion/despliegue/).

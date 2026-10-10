@@ -1,0 +1,41 @@
+---
+title: "Capacidad y prueba de carga"
+description: "Cuántos inicios de sesión por segundo soporta una réplica de hypot Auth, cómo escalar y cómo ejecutar la prueba de latencia de login."
+---
+
+import { Aside, Code } from '@astrojs/starlight/components';
+import loginLoad from '../../../../examples/shell/login-load.sh?raw';
+
+**El login está limitado por la CPU: bcrypt con costo 12 tarda unos 250 ms de un núcleo, y con el pool de hilos por defecto una réplica sirve unos 16 inicios de sesión por segundo.** Se escala horizontalmente agregando réplicas.
+
+## Por qué el login es lo que cuesta
+
+Signup, reset y change también calculan un hash, y un login con un correo desconocido calcula un hash ficticio para que el tiempo no filtre información. Las peticiones que un límite o un bloqueo rechaza se contestan antes del hash.
+
+| Dato | Cifra |
+|------|-------|
+| Un hash bcrypt de costo 12 | Unos 250 ms de un núcleo |
+| Pool de hilos de libuv (`UV_THREADPOOL_SIZE`, por defecto 4) | 4 hashes a la vez, es decir, unos **16 inicios de sesión por segundo por proceso** |
+| Más hilos que núcleos | Sin ganancia. Pon `UV_THREADPOOL_SIZE` igual al número de núcleos del contenedor |
+| Escalado | Horizontal. Unos 16 logins por segundo cada réplica, así que 1000 por segundo necesitan unos 63 procesos de 4 núcleos |
+| Conexiones a la base de datos | Cada proceso mantiene como máximo 10 (`DB_POOL_MAX`, una constante del código). **Réplicas por 10 debe caber en `max_connections` de Postgres**, menos una reserva para migraciones y operadores. El valor por defecto de 100 permite unas 9 réplicas |
+| Muchas réplicas | Pon PgBouncer delante. Auth no guarda estado a nivel de sesión (sin advisory locks, `LISTEN` ni `SET` de sesión), pero **no se ha probado a través de PgBouncer**: verifícalo en staging |
+| Pool agotado | Quien llama espera 5000 ms por una conexión (`DB_CONNECTION_TIMEOUT_MS`). En la ruta de contadores (todos los endpoints de credenciales) la respuesta es `503 temporarily_unavailable`; en otros sitios es un `500`. El pool se recupera cuando baja la carga |
+
+## La prueba de latencia de login
+
+El criterio (ADR 12): el P95 del login por debajo de 500 ms con la carga del piloto. Se ejecuta a mano contra una instancia en marcha.
+
+<Aside type="caution" title="Prepara la instancia antes de medir">
+Usa una instancia dedicada o de staging, una cuenta confirmada y **eleva los límites de login** durante la prueba, porque una cuenta desde una sola dirección se bloquea tras 5 intentos por diseño y un login bloqueado es rápido, lo que falsearía un resultado correcto. El script falla si alguna respuesta no es `200` por ese motivo.
+</Aside>
+
+Arranca la instancia con `ABUSE_LOGIN_IP_LIMIT`, `ABUSE_LOGIN_ACCOUNT_IP_LIMIT` y `ABUSE_LOGIN_ACCOUNT_LIMIT` elevados (por ejemplo, a 100000), y ejecuta:
+
+<Code code={loginLoad} lang="sh" title="login-load.sh" />
+
+El script imprime el rendimiento, el conteo de estados y la latencia mínima, mediana, P95, P99 y máxima, y luego `GATE PASSED` (código de salida 0) o `GATE FAILED` (código 1; el código 2 indica argumentos inválidos). Ajusta `--concurrency` al número de inicios de sesión simultáneos que espera tu piloto y usa `--threshold-ms` solo para endurecer el criterio. La cifra de carga del piloto es una decisión de producto que este repositorio no fija.
+
+## Siguiente paso
+
+Consulta la [referencia de la API](/referencia/) o cómo se construye esta documentación en [Sobre esta documentación](/sobre-esta-documentacion/).

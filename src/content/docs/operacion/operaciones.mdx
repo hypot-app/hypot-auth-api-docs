@@ -1,0 +1,95 @@
+---
+title: "Operaciones"
+description: "Tareas del operador de hypot Auth: revocar todas las sesiones, rotar las claves de firma, trabajos de segundo plano y retención de datos."
+---
+
+import { Aside, Code } from '@astrojs/starlight/components';
+import revokeAll from '../../../../examples/cli/ops-revoke-all.sh?raw';
+import signingKeys from '../../../../examples/config/signing-keys.example.json?raw';
+import migrate from '../../../../examples/cli/migrate.sh?raw';
+
+**Operar Auth se reduce a pocas tareas: migrar, revocar sesiones, rotar claves y vigilar la base de datos.** Esta página es el cuaderno de operaciones.
+
+## Tareas habituales
+
+| Tarea | Cómo |
+|-------|------|
+| Aplicar migraciones | Ejecuta el comando de migración dentro de la imagen, antes de iniciar la versión nueva (ver [Despliegue](/operacion/despliegue/)). La aplicación nunca migra al arrancar. |
+| Registrar, actualizar o desactivar una app | La CLI del operador (ver [Apps y orígenes](/conceptos/apps-y-origenes/)). |
+| Revocar todas las sesiones | `ops:revoke-all --yes` (abajo). |
+| Rotar las claves de firma | Los pasos de la sección siguiente. |
+| Regenerar la descripción OpenAPI | `npm run openapi:generate` en el repositorio de la API escribe `openapi.json`. Es un artefacto de compilación: ninguna ruta lo sirve y una prueba falla si está desactualizado. Esta documentación lo lee de ahí (ver [Sobre esta documentación](/sobre-esta-documentacion/)). |
+| Comprobar el flujo en un navegador real | `docs/smoke-test.md` en el repositorio de la API. |
+| Medir la latencia de login | `scripts/login-load.mjs` (ver [Capacidad](/operacion/capacidad/)). |
+
+## Revocar todas las sesiones
+
+<Code code={revokeAll} lang="sh" title="ops-revoke-all.sh" />
+
+Termina todas las sesiones abiertas de todas las apps (razón `ops_revoke_all`), imprime `revoked sessions: <cantidad>` y se niega a ejecutarse sin `--yes`. No necesita clave de firma. Todos los usuarios deberán iniciar sesión otra vez.
+
+<Aside type="caution" title="Los access tokens ya emitidos siguen valiendo">
+Los access tokens existentes siguen válidos hasta su `exp` (como máximo 1 hora). Por eso, ante una clave comprometida, `ops:revoke-all` va acompañado de una rotación de claves.
+</Aside>
+
+## Rotación de claves de firma
+
+Los access tokens se firman con un conjunto de claves que se entrega como secreto y nunca se guarda en el repositorio. Es un único documento JSON:
+
+<Code code={signingKeys} lang="json" title="signing-keys.example.json" />
+
+| Miembro | Contenido |
+|---------|-----------|
+| `active` | JWK **privada** con la que se firma. Lleva `kid`. |
+| `next` | JWK privada de la clave siguiente. Se publica en la JWKS antes de usarse. |
+| `retired` | Lista de JWK (basta la parte pública) que siguen publicadas mientras puedan existir tokens firmados con ellas. Cada una lleva `retiredAt`. |
+
+La rotación es un cambio de configuración y exige reiniciar **todas** las instancias:
+
+1. **Agrega la clave nueva como `next`** y despliega. El temporizador empieza solo cuando **todas** las instancias sirven `next`.
+2. **Espera al menos 15 minutos** (se recomienda 1 hora). Los consumidores guardan la JWKS en caché: el endpoint dice 5 minutos, pero la caché remota de `jose` usa 10 minutos por defecto, ignora `Cache-Control` y los proxies suman más.
+3. **Promueve**: mueve `next` a `active` y la antigua `active` a `retired`, agregando `"retiredAt": "<marca de tiempo ISO>"` a la entrada retirada.
+4. **Retiro**: la clave retirada se publica hasta `retiredAt` más la retención de 1 hora + 5 s de tolerancia de reloj + 10 minutos de caché de `jose` (4205 s). En el siguiente arranque posterior se descarta y un aviso nombra su `kid`; elimina entonces la entrada del secreto. Una clave retirada sin `retiredAt` nunca vence y registra un aviso al arrancar.
+
+Una rotación de emergencia además revoca todos los refresh tokens con `ops:revoke-all`.
+
+El generador de claves de desarrollo (`npm run keys:generate`, o el servicio `keygen` del compose de la API) crea un conjunto descartable. **Las claves de producción vienen de un gestor de secretos.**
+
+## Trabajos de segundo plano
+
+`main.ts` arranca tres temporizadores y nada más lo hace: ni la CLI, ni el trabajo de migración, ni las pruebas los ejecutan. Cada réplica ejecuta su copia, lo cual es seguro.
+
+| Trabajo | Cuándo | Qué hace |
+|---------|--------|----------|
+| Envío de correos | Cada 2 s | Envía por SMTP los correos de la cola, con espera creciente entre intentos, 8 intentos y luego marca `failed` |
+| Barredor de contadores | Al iniciar y luego cada 5 min | Borra las filas de `abuse_counters` cuya ventana y bloqueo terminaron |
+| Barredor de retención | Al iniciar y luego cada hora | Borra las filas de la tabla siguiente, en lotes de 1000 hasta que un lote vuelve corto |
+
+### Retención de datos
+
+| Datos | Se borran cuando | Por qué ese plazo |
+|-------|------------------|-------------------|
+| Sesiones y sus refresh tokens | 1 día después del `expires_at` de la sesión | Los tokens consumidos de una sesión viva se conservan a propósito: presentar uno es la detección de reutilización |
+| `one_time_tokens` (confirmación y restablecimiento) | 1 día después del `expires_at`, consumidos o no | Son de vida corta por naturaleza (24 h y 1 h) |
+| `email_outbox` en estado `sent` o `failed` | 7 días después de `created_at` | Tiempo para investigar un problema de entrega |
+| `email_outbox` en estado `pending` | Nunca | Es la cola viva |
+| `abuse_counters` | Al vencer (barredor de contadores) | Una ventana terminada no tiene valor |
+| `users` y `apps` | Nunca | Fuera del alcance de la Fase 1 |
+
+Un barrido que falla registra `retention sweep of <sessions|one-time tokens|outbox> failed: <mensaje del controlador>` (solo el mensaje) y la hora siguiente lo reintenta; las demás categorías se ejecutan igualmente.
+
+## Plantillas de correo
+
+Las plantillas por defecto viven en `src/transactional-email/templates/default/` de la API. Para personalizarlas para una sola app, coloca archivos con los mismos nombres en `templates/<client_id>/`. La plantilla de confirmación dice que el enlace vale 24 horas y la de restablecimiento que vale 1 hora; una plantilla propia lleva su propio texto y debe respetar esos plazos.
+
+Una app creada antes de que existieran las URL de correo no las tiene: sus correos de confirmación, restablecimiento y "la cuenta ya existe" se marcan `failed` (el motivo nombra el campo ausente) en lugar de enviarse con un enlace roto. Se arregla con `app update` (ver [Apps y orígenes](/conceptos/apps-y-origenes/)).
+
+## Migraciones
+
+<Code code={migrate} lang="sh" title="migrate.sh" />
+
+Una prueba de la API aplica toda la cadena de migraciones, la revierte hasta un esquema vacío y la aplica otra vez.
+
+## Siguiente paso
+
+Dimensiona el servicio en [Capacidad y prueba de carga](/operacion/capacidad/).

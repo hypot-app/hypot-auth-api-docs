@@ -1,0 +1,81 @@
+---
+title: "Despliegue"
+description: "Cómo desplegar la API de hypot Auth en producción: imagen, migraciones, variables, TRUST_PROXY, AUTH_PUBLIC_BASE_URL con https y el compose de desarrollo."
+---
+
+import { Aside, Code, Steps } from '@astrojs/starlight/components';
+import buildImage from '../../../../examples/shell/build-api-image.sh?raw';
+import migrate from '../../../../examples/cli/migrate.sh?raw';
+import environment from '../../../../examples/config/auth-environment.example?raw';
+import appCreateProduction from '../../../../examples/cli/app-create-production.sh?raw';
+import migrateRevert from '../../../../examples/cli/migrate-revert.sh?raw';
+
+**Se despliega aplicando primero las migraciones y después arrancando la aplicación. Se escala agregando réplicas. El único estado que debes proteger es Postgres y el secreto de las claves de firma.**
+
+## Ruta rápida
+
+<Steps>
+
+1. **Construye la imagen** desde el repositorio de la API. La imagen de ejecución es *distroless*: no tiene shell ni npm, así que los comandos de `npm run ...` no existen dentro de ella.
+
+   <Code code={buildImage} lang="sh" title="build-api-image.sh" />
+
+2. **Prepara los secretos.** Un Postgres y un archivo de claves de firma (ver [Operaciones](/operacion/operaciones/#rotación-de-claves-de-firma)), montado como secreto del orquestador y apuntado por `AUTH_SIGNING_KEYS_FILE`. Las claves de producción vienen de un gestor de secretos; **nunca** ejecutes el generador de desarrollo contra producción.
+
+3. **Define el entorno.** Todas las variables están en [Configuración](/operacion/configuracion/). Este es un ejemplo de producción:
+
+   <Code code={environment} lang="ini" title="auth-environment.example" />
+
+4. **Aplica las migraciones** antes de iniciar la versión nueva. La aplicación nunca migra al arrancar. Ejecuta el comando dentro de la imagen, con `DATABASE_URL` en el entorno, como un trabajo de una sola ejecución de tu plataforma:
+
+   <Code code={migrate} lang="sh" title="migrate.sh" />
+
+5. **Arranca una o más réplicas** de la imagen (`dist/main.js`) detrás de tu balanceador con TLS.
+
+6. **Registra tu app** con la CLI del operador usando URL `https`:
+
+   <Code code={appCreateProduction} lang="sh" title="app-create-production.sh" />
+
+7. **Verifica.** `GET /health` responde `200` (o `503` si la base de datos no responde) y `GET /.well-known/jwks.json` publica las claves públicas.
+
+</Steps>
+
+## Las reglas que más fallan
+
+| Ajuste | Regla |
+|--------|-------|
+| `AUTH_PUBLIC_BASE_URL` | En producción, una URL `https` sin barra final, sin query y sin fragmento, por ejemplo `https://auth.example.com`. Se copia tal cual en el `iss` de cada token y de ella sale la URL de la JWKS. **El servicio se niega a arrancar** con cualquier otro valor. |
+| `TRUST_PROXY` | Pon el número de saltos o los CIDR de los proxies delante de Auth (por defecto `false`). Sin configurarlo detrás de un balanceador, todos los clientes comparten la dirección del proxy: un usuario puede agotar el límite de IP de todos. Si lo pones de más, un `X-Forwarded-For` del cliente prevalece. La ventana de gracia del refresh también depende de este valor. `true` se rechaza. |
+| Contadores | `abuse_counters` es una tabla `UNLOGGED`: rápida, pero sin recuperación tras un fallo ni replicación. Tras un fallo o un cambio de servidor queda vacía y cada ventana y bloqueo empieza de nuevo, lo cual solo perdona. |
+| Migraciones | Se aplican antes de la versión nueva, con un trabajo aparte. Cada ejecución de `migration:revert` deshace una migración. |
+| Base de datos | Cada proceso mantiene como máximo 10 conexiones (constante `DB_POOL_MAX`, no una variable de entorno). **Réplicas por 10 debe caber en `max_connections` de Postgres**, menos una reserva para migraciones y operadores. |
+
+<Aside type="caution" title="Si en producción las URL de tus apps son http">
+Con `NODE_ENV=production`, la CLI rechaza orígenes y URL `http` (solo se aceptan para `localhost` y `127.0.0.1` fuera de producción). Registra tus apps con `https`.
+</Aside>
+
+## Tras un balanceador
+
+Detrás de un balanceador con TLS:
+
+1. El balanceador termina HTTPS y habla HTTP con Auth. Auth lee la IP del cliente de `X-Forwarded-For` según `TRUST_PROXY`.
+2. `AUTH_PUBLIC_BASE_URL` es la URL pública `https` que ven tus consumidores (la misma que el emisor `iss`), no la dirección interna.
+3. Comprueba con una petición real que los bloqueos y límites distinguen a los clientes: si todos los intentos de login de distintas personas se bloquean entre sí, `TRUST_PROXY` está mal.
+
+## Cierre ordenado y salud
+
+- Cada réplica ejecuta sus propios trabajos de segundo plano (envío de correos, limpieza de contadores y retención). Es seguro tener varios: la cola de correos usa `FOR UPDATE SKIP LOCKED` y los barredores solo borran.
+- Al recibir `SIGTERM`, cada trabajo deja de programarse y termina el lote en curso antes de cerrar el pool. Da al contenedor un periodo de gracia de **70 segundos** (el envío de un correo tiene un plazo de 60 s).
+- La imagen incluye un `HEALTHCHECK` que consulta `/health` (que a su vez hace un ping a la base de datos).
+
+## El compose de la API es solo para desarrollo
+
+El `compose.yaml` del repositorio de la API usa una URL `http`, `NODE_ENV=development`, secretos de desarrollo y claves de desarrollo generadas. **No lo uses para desplegar.** Su servicio `migrate` ejecuta el mismo comando de este documento y la API espera a que termine con éxito.
+
+Deshacer una migración, si hace falta:
+
+<Code code={migrateRevert} lang="sh" title="migrate-revert.sh" />
+
+## Siguiente paso
+
+Revisa todas las variables en [Configuración](/operacion/configuracion/) y el mantenimiento diario en [Operaciones](/operacion/operaciones/).
